@@ -68,7 +68,7 @@ ifneq ($(LLVM),)
 CFLAGS += -Wno-unused-command-line-argument
 endif
 
-LDFLAGS = -lelf -lz -lpthread
+LDFLAGS = -lelf -lz -lpthread -lzstd
 
 IS_LITTLE_ENDIAN = $(shell $(CC) -dM -E - </dev/null |				\
 			grep 'define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__')
@@ -147,33 +147,52 @@ $(INCLUDE_DIR)/%.bpf.skel.h: $(SCXOBJ_DIR)/%.bpf.o $(INCLUDE_DIR)/vmlinux.h $(BP
 ################
 # C schedulers #
 ################
-c-sched-targets :=			\
-	dsp_fallbackdsq_fail		\
-	dsp_localdsq_fail		\
+
+override define CLEAN
+	rm -rf $(OUTPUT_DIR)
+	rm -f *.o *.bpf.o *.bpf.skel.h *.bpf.subskel.h
+	rm -f $(TEST_GEN_PROGS)
+	rm -f runner
+endef
+
+auto-test-targets :=			\
 	enq_last_no_enq_fails		\
-	enqueue_select_cpu_fails	\
+	enq_select_cpu_fails		\
+	ddsp_bogus_dsq_fail		\
+	ddsp_vtimelocal_fail		\
 	init_enable_count		\
 	minimal				\
 	select_cpu_dfl			\
 	select_cpu_dfl_nodispatch	\
 	select_cpu_dispatch		\
 	select_cpu_dispatch_bad_dsq	\
-	select_cpu_dispatch_dbl_dsp
+	select_cpu_dispatch_dbl_dsp	\
+	select_cpu_vtime		\
+	test_example
 
-$(c-sched-targets): %: $(filter-out %.bpf.c,%.c) $(INCLUDE_DIR)/%.bpf.skel.h
-	$(eval sched=$(notdir $@))
-	$(CC) $(CFLAGS) -c $(sched).c -o $(SCXOBJ_DIR)/$(sched).o
-	$(CC) -o $@ $(SCXOBJ_DIR)/$(sched).o $(LIBBPF_OUTPUT) $(LDFLAGS)
+testcase-targets := $(addsuffix .o,$(addprefix $(SCXOBJ_DIR)/,$(auto-test-targets)))
 
-TEST_GEN_PROGS := $(c-sched-targets)
+$(SCXOBJ_DIR)/runner.o: runner.c | $(SCXOBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-override define CLEAN
-	rm -rf $(OUTPUT_DIR)
-	rm -f *.o *.bpf.o *.bpf.skel.h *.bpf.subskel.h
-	rm -f $(TEST_GEN_PROGS)
-endef
+# Create all of the test targets object files, whose testcase objects will be
+# registered into the runner in ELF constructors.
+#
+# Note that we must do double expansion here in order to support conditionally
+# compiling BPF object files only if one is present, as the wildcard Make
+# function doesn't support using implicit rules otherwise.
+.SECONDEXPANSION:
+$(testcase-targets): $(SCXOBJ_DIR)/%.o: %.c $(SCXOBJ_DIR)/runner.o $$(if $$(wildcard $$*.bpf.c), $(INCLUDE_DIR)/%.bpf.skel.h) | $(SCXOBJ_DIR)
+	$(eval test=$(patsubst %.o,%.c,$(notdir $@)))
+	$(CC) $(CFLAGS) -c $< -o $@ $(SCXOBJ_DIR)/runner.o
 
-all: $(TEST_GEN_PROGS)
+runner: $(SCXOBJ_DIR)/runner.o $(BPFOBJ) $(testcase-targets)
+	@echo "$(testcase-targets)"
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+TEST_GEN_PROGS := runner
+
+all: runner
 
 .PHONY: all clean help
 

@@ -46,6 +46,11 @@
 #include <scx/common.bpf.h>
 #include "scx_flatcg.h"
 
+/*
+ * Maximum amount of retries to find a valid cgroup.
+ */
+#define CGROUP_MAX_RETRIES 1024
+
 char _license[] SEC("license") = "GPL";
 
 const volatile u32 nr_cpus = 32;	/* !0 for veristat, set during init */
@@ -123,7 +128,7 @@ struct {
 } task_ctx SEC(".maps");
 
 /* gets inc'd on weight tree changes to expire the cached hweights */
-unsigned long hweight_gen = 1;
+u64 hweight_gen = 1;
 
 static u64 div_round_up(u64 dividend, u64 divisor)
 {
@@ -302,6 +307,45 @@ static void cgrp_enqueued(struct cgroup *cgrp, struct fcg_cgrp_ctx *cgc)
 	bpf_spin_unlock(&cgv_tree_lock);
 }
 
+static void set_bypassed_at(struct task_struct *p, struct fcg_task_ctx *taskc)
+{
+	/*
+	 * Tell fcg_stopping() that this bypassed the regular scheduling path
+	 * and should be force charged to the cgroup. 0 is used to indicate that
+	 * the task isn't bypassing, so if the current runtime is 0, go back by
+	 * one nanosecond.
+	 */
+	taskc->bypassed_at = p->se.sum_exec_runtime ?: (u64)-1;
+}
+
+s32 BPF_STRUCT_OPS(fcg_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags)
+{
+	struct fcg_task_ctx *taskc;
+	bool is_idle = false;
+	s32 cpu;
+
+	cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+
+	taskc = bpf_task_storage_get(&task_ctx, p, 0, 0);
+	if (!taskc) {
+		scx_bpf_error("task_ctx lookup failed");
+		return cpu;
+	}
+
+	/*
+	 * If select_cpu_dfl() is recommending local enqueue, the target CPU is
+	 * idle. Follow it and charge the cgroup later in fcg_stopping() after
+	 * the fact.
+	 */
+	if (is_idle) {
+		set_bypassed_at(p, taskc);
+		stat_inc(FCG_STAT_LOCAL);
+		scx_bpf_dispatch(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+	}
+
+	return cpu;
+}
+
 void BPF_STRUCT_OPS(fcg_enqueue, struct task_struct *p, u64 enq_flags)
 {
 	struct fcg_task_ctx *taskc;
@@ -315,20 +359,12 @@ void BPF_STRUCT_OPS(fcg_enqueue, struct task_struct *p, u64 enq_flags)
 	}
 
 	/*
-	 * If select_cpu_dfl() is recommending local enqueue, the target CPU is
-	 * idle. Follow it and charge the cgroup later in fcg_stopping() after
-	 * the fact. Use the same mechanism to deal with tasks with custom
-	 * affinities so that we don't have to worry about per-cgroup dq's
-	 * containing tasks that can't be executed from some CPUs.
+	 * Use the direct dispatching and force charging to deal with tasks with
+	 * custom affinities so that we don't have to worry about per-cgroup
+	 * dq's containing tasks that can't be executed from some CPUs.
 	 */
-	if ((enq_flags & SCX_ENQ_LOCAL) || p->nr_cpus_allowed != nr_cpus) {
-		/*
-		 * Tell fcg_stopping() that this bypassed the regular scheduling
-		 * path and should be force charged to the cgroup. 0 is used to
-		 * indicate that the task isn't bypassing, so if the current
-		 * runtime is 0, go back by one nanosecond.
-		 */
-		taskc->bypassed_at = p->se.sum_exec_runtime ?: (u64)-1;
+	if (p->nr_cpus_allowed != nr_cpus) {
+		set_bypassed_at(p, taskc);
 
 		/*
 		 * The global dq is deprioritized as we don't want to let tasks
@@ -338,8 +374,7 @@ void BPF_STRUCT_OPS(fcg_enqueue, struct task_struct *p, u64 enq_flags)
 		 * implement per-cgroup fallback dq's instead so that we have
 		 * more control over when tasks with custom cpumask get issued.
 		 */
-		if ((enq_flags & SCX_ENQ_LOCAL) ||
-		    (p->nr_cpus_allowed == 1 && (p->flags & PF_KTHREAD))) {
+		if (p->nr_cpus_allowed == 1 && (p->flags & PF_KTHREAD)) {
 			stat_inc(FCG_STAT_LOCAL);
 			scx_bpf_dispatch(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
 		} else {
@@ -675,6 +710,7 @@ out_stash:
 		bpf_spin_lock(&cgv_tree_lock);
 		bpf_rbtree_add(&cgv_tree, &cgv_node->rb_node, cgv_node_less);
 		bpf_spin_unlock(&cgv_tree_lock);
+		stat_inc(FCG_STAT_PNC_RACE);
 	} else {
 		cgv_node = bpf_kptr_xchg(&stash->node, cgv_node);
 		if (cgv_node) {
@@ -696,6 +732,7 @@ void BPF_STRUCT_OPS(fcg_dispatch, s32 cpu, struct task_struct *prev)
 	struct fcg_cgrp_ctx *cgc;
 	struct cgroup *cgrp;
 	u64 now = bpf_ktime_get_ns();
+	bool picked_next = false;
 
 	cpuc = find_cpu_ctx();
 	if (!cpuc)
@@ -750,14 +787,25 @@ pick_next_cgroup:
 		return;
 	}
 
-	bpf_repeat(BPF_MAX_LOOPS) {
-		if (try_pick_next_cgroup(&cpuc->cur_cgid))
+	bpf_repeat(CGROUP_MAX_RETRIES) {
+		if (try_pick_next_cgroup(&cpuc->cur_cgid)) {
+			picked_next = true;
 			break;
+		}
 	}
+
+	/*
+	 * This only happens if try_pick_next_cgroup() races against enqueue
+	 * path for more than CGROUP_MAX_RETRIES times, which is extremely
+	 * unlikely and likely indicates an underlying bug. There shouldn't be
+	 * any stall risk as the race is against enqueue.
+	 */
+	if (!picked_next)
+		stat_inc(FCG_STAT_PNC_FAIL);
 }
 
-s32 BPF_STRUCT_OPS(fcg_prep_enable, struct task_struct *p,
-		   struct scx_enable_args *args)
+s32 BPF_STRUCT_OPS(fcg_init_task, struct task_struct *p,
+		   struct scx_init_task_args *args)
 {
 	struct fcg_task_ctx *taskc;
 	struct fcg_cgrp_ctx *cgc;
@@ -893,13 +941,14 @@ void BPF_STRUCT_OPS(fcg_exit, struct scx_exit_info *ei)
 
 SEC(".struct_ops.link")
 struct sched_ext_ops flatcg_ops = {
+	.select_cpu		= (void *)fcg_select_cpu,
 	.enqueue		= (void *)fcg_enqueue,
 	.dispatch		= (void *)fcg_dispatch,
 	.runnable		= (void *)fcg_runnable,
 	.running		= (void *)fcg_running,
 	.stopping		= (void *)fcg_stopping,
 	.quiescent		= (void *)fcg_quiescent,
-	.prep_enable		= (void *)fcg_prep_enable,
+	.init_task		= (void *)fcg_init_task,
 	.cgroup_set_weight	= (void *)fcg_cgroup_set_weight,
 	.cgroup_init		= (void *)fcg_cgroup_init,
 	.cgroup_exit		= (void *)fcg_cgroup_exit,

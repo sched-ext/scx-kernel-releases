@@ -9,10 +9,15 @@
 #define SCX_OP_IDX(op)		(offsetof(struct sched_ext_ops, op) / sizeof(void (*)(void)))
 
 enum scx_internal_consts {
-	SCX_NR_ONLINE_OPS	= SCX_OP_IDX(init),
-	SCX_DSP_DFL_MAX_BATCH	= 32,
-	SCX_DSP_MAX_LOOPS	= 32,
-	SCX_WATCHDOG_MAX_TIMEOUT = 30 * HZ,
+	SCX_OPI_BEGIN			= 0,
+	SCX_OPI_NORMAL_BEGIN		= 0,
+	SCX_OPI_NORMAL_END		= SCX_OP_IDX(cpu_online),
+	SCX_OPI_CPU_HOTPLUG_BEGIN	= SCX_OP_IDX(cpu_online),
+	SCX_OPI_CPU_HOTPLUG_END		= SCX_OP_IDX(init),
+	SCX_OPI_END			= SCX_OP_IDX(init),
+	SCX_DSP_DFL_MAX_BATCH		= 32,
+	SCX_DSP_MAX_LOOPS		= 32,
+	SCX_WATCHDOG_MAX_TIMEOUT	= 30 * HZ,
 };
 
 enum scx_ops_enable_state {
@@ -104,8 +109,8 @@ static DEFINE_STATIC_KEY_FALSE(scx_ops_enq_exiting);
 DEFINE_STATIC_KEY_FALSE(scx_ops_cpu_preempt);
 static DEFINE_STATIC_KEY_FALSE(scx_builtin_idle_enabled);
 
-struct static_key_false scx_has_op[SCX_NR_ONLINE_OPS] =
-	{ [0 ... SCX_NR_ONLINE_OPS-1] = STATIC_KEY_FALSE_INIT };
+struct static_key_false scx_has_op[SCX_OPI_END] =
+	{ [0 ... SCX_OPI_END-1] = STATIC_KEY_FALSE_INIT };
 
 static atomic_t scx_exit_kind = ATOMIC_INIT(SCX_EXIT_DONE);
 static struct scx_exit_info scx_exit_info;
@@ -682,6 +687,15 @@ static void dispatch_enqueue(struct scx_dispatch_q *dsq, struct task_struct *p,
 	p->scx.dsq = dsq;
 
 	/*
+	 * scx.ddsp_dsq_id and scx.ddsp_enq_flags are only relevant on the
+	 * direct dispatch path, but we clear them here because the direct
+	 * dispatch verdict may be overridden on the enqueue path during e.g.
+	 * bypass.
+	 */
+	p->scx.ddsp_dsq_id = SCX_DSQ_INVALID;
+	p->scx.ddsp_enq_flags = 0;
+
+	/*
 	 * We're transitioning out of QUEUEING or DISPATCHING. store_release to
 	 * match waiters' load_acquire.
 	 */
@@ -833,12 +847,11 @@ static void mark_direct_dispatch(struct task_struct *ddsp_task,
 		return;
 	}
 
-	WARN_ON_ONCE(p->scx.ddsq_id != SCX_DSQ_INVALID);
-	WARN_ON_ONCE(p->scx.flags & SCX_TASK_DDSP_PRIQ);
+	WARN_ON_ONCE(p->scx.ddsp_dsq_id != SCX_DSQ_INVALID);
+	WARN_ON_ONCE(p->scx.ddsp_enq_flags);
 
-	p->scx.ddsq_id = dsq_id;
-	if (enq_flags & SCX_ENQ_DSQ_PRIQ)
-		p->scx.flags |= SCX_TASK_DDSP_PRIQ;
+	p->scx.ddsp_dsq_id = dsq_id;
+	p->scx.ddsp_enq_flags = enq_flags;
 }
 
 static void direct_dispatch(struct task_struct *p, u64 enq_flags)
@@ -847,14 +860,9 @@ static void direct_dispatch(struct task_struct *p, u64 enq_flags)
 
 	touch_core_sched_dispatch(task_rq(p), p);
 
-	if (p->scx.flags & SCX_TASK_DDSP_PRIQ) {
-		enq_flags |= SCX_ENQ_DSQ_PRIQ;
-		p->scx.flags &= ~SCX_TASK_DDSP_PRIQ;
-	}
-
-	dsq = find_dsq_for_dispatch(task_rq(p), p->scx.ddsq_id, p);
-	dispatch_enqueue(dsq, p, enq_flags | SCX_ENQ_CLEAR_OPSS);
-	p->scx.ddsq_id = SCX_DSQ_INVALID;
+	enq_flags |= (p->scx.ddsp_enq_flags | SCX_ENQ_CLEAR_OPSS);
+	dsq = find_dsq_for_dispatch(task_rq(p), p->scx.ddsp_dsq_id, p);
+	dispatch_enqueue(dsq, p, enq_flags);
 }
 
 static bool test_rq_online(struct rq *rq)
@@ -874,9 +882,6 @@ static void do_enqueue_task(struct rq *rq, struct task_struct *p, u64 enq_flags,
 
 	WARN_ON_ONCE(!(p->scx.flags & SCX_TASK_QUEUED));
 
-	if (p->scx.ddsq_id != SCX_DSQ_INVALID)
-		goto direct;
-
 	/* rq migration */
 	if (sticky_cpu == cpu_of(rq))
 		goto local_norefill;
@@ -895,6 +900,9 @@ static void do_enqueue_task(struct rq *rq, struct task_struct *p, u64 enq_flags,
 		else
 			goto global;
 	}
+
+	if (p->scx.ddsp_dsq_id != SCX_DSQ_INVALID)
+		goto direct;
 
 	/* see %SCX_OPS_ENQ_EXITING */
 	if (!static_branch_unlikely(&scx_ops_enq_exiting) &&
@@ -922,7 +930,7 @@ static void do_enqueue_task(struct rq *rq, struct task_struct *p, u64 enq_flags,
 	SCX_CALL_OP_TASK(SCX_KF_ENQUEUE, enqueue, p, enq_flags);
 
 	*ddsp_taskp = NULL;
-	if (p->scx.ddsq_id != SCX_DSQ_INVALID)
+	if (p->scx.ddsp_dsq_id != SCX_DSQ_INVALID)
 		goto direct;
 
 	/*
@@ -2142,7 +2150,7 @@ static int select_task_rq_scx(struct task_struct *p, int prev_cpu, int wake_flag
 		cpu = scx_select_cpu_dfl(p, prev_cpu, wake_flags, &found);
 		if (found) {
 			p->scx.slice = SCX_SLICE_DFL;
-			p->scx.ddsq_id = SCX_DSQ_LOCAL;
+			p->scx.ddsp_dsq_id = SCX_DSQ_LOCAL;
 		}
 		return cpu;
 	}
@@ -3193,9 +3201,12 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 	static_branch_disable(&__scx_switched_all);
 	WRITE_ONCE(scx_switching_all, false);
 
-	/* avoid racing against fork and cgroup changes */
-	cpus_read_lock();
+	/*
+	 * Avoid racing against fork and cgroup changes. See scx_ops_enable()
+	 * for explanation on the locking order.
+	 */
 	percpu_down_write(&scx_fork_rwsem);
+	cpus_read_lock();
 	scx_cgroup_lock();
 
 	spin_lock_irq(&scx_tasks_lock);
@@ -3225,7 +3236,7 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 
 	/* no task is on scx, turn off all the switches and flush in-progress calls */
 	static_branch_disable_cpuslocked(&__scx_ops_enabled);
-	for (i = 0; i < SCX_NR_ONLINE_OPS; i++)
+	for (i = SCX_OPI_BEGIN; i < SCX_OPI_END; i++)
 		static_branch_disable_cpuslocked(&scx_has_op[i]);
 	static_branch_disable_cpuslocked(&scx_ops_enq_last);
 	static_branch_disable_cpuslocked(&scx_ops_enq_exiting);
@@ -3236,8 +3247,8 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 	scx_cgroup_exit();
 
 	scx_cgroup_unlock();
-	percpu_up_write(&scx_fork_rwsem);
 	cpus_read_unlock();
+	percpu_up_write(&scx_fork_rwsem);
 
 	if (ei->kind >= SCX_EXIT_ERROR) {
 		printk(KERN_ERR "sched_ext: BPF scheduler \"%s\" errored, disabling\n", scx_ops.name);
@@ -3370,13 +3381,13 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 			   scx_create_rt_helper("sched_ext_ops_helper"));
 		if (!scx_ops_helper) {
 			ret = -ENOMEM;
-			goto err_unlock;
+			goto err;
 		}
 	}
 
 	if (scx_ops_enable_state() != SCX_OPS_DISABLED) {
 		ret = -EBUSY;
-		goto err_unlock;
+		goto err;
 	}
 
 	/*
@@ -3405,7 +3416,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 		ret = SCX_CALL_OP_RET(SCX_KF_INIT, init);
 		if (ret) {
 			ret = ops_sanitize_err("init", ret);
-			goto err_disable;
+			goto err_disable_unlock_cpus;
 		}
 
 		/*
@@ -3417,8 +3428,14 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 		 * ops.exit() like other scx_bpf_error() invocations.
 		 */
 		if (atomic_read(&scx_exit_kind) != SCX_EXIT_NONE)
-			goto err_disable;
+			goto err_disable_unlock_cpus;
 	}
+
+	for (i = SCX_OPI_CPU_HOTPLUG_BEGIN; i < SCX_OPI_CPU_HOTPLUG_END; i++)
+		if (((void (**)(void))ops)[i])
+			static_branch_enable_cpuslocked(&scx_has_op[i]);
+
+	cpus_read_unlock();
 
 	ret = validate_ops(ops);
 	if (ret)
@@ -3446,11 +3463,26 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	/*
 	 * Lock out forks, cgroup on/offlining and moves before opening the
 	 * floodgate so that they don't wander into the operations prematurely.
+	 *
+	 * We don't need to keep the CPUs stable but static_branch_*() requires
+	 * cpus_read_lock() and scx_cgroup_rwsem must nest inside
+	 * cpu_hotplug_lock because of the following dependency chain:
+	 *
+	 *   cpu_hotplug_lock --> cgroup_threadgroup_rwsem --> scx_cgroup_rwsem
+	 *
+	 * So, we need to do cpus_read_lock() before scx_cgroup_lock() and use
+	 * static_branch_*_cpuslocked().
+	 *
+	 * Note that cpu_hotplug_lock must nest inside scx_fork_rwsem due to the
+	 * following dependency chain:
+	 *
+	 *   scx_fork_rwsem --> pernet_ops_rwsem --> cpu_hotplug_lock
 	 */
 	percpu_down_write(&scx_fork_rwsem);
+	cpus_read_lock();
 	scx_cgroup_lock();
 
-	for (i = 0; i < SCX_NR_ONLINE_OPS; i++)
+	for (i = SCX_OPI_NORMAL_BEGIN; i < SCX_OPI_NORMAL_END; i++)
 		if (((void (**)(void))ops)[i])
 			static_branch_enable_cpuslocked(&scx_has_op[i]);
 
@@ -3475,7 +3507,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	 */
 	ret = scx_cgroup_init();
 	if (ret)
-		goto err_disable_unlock;
+		goto err_disable_unlock_all;
 
 	static_branch_enable_cpuslocked(&__scx_ops_enabled);
 
@@ -3501,7 +3533,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 			spin_unlock_irq(&scx_tasks_lock);
 			pr_err("sched_ext: ops.init_task() failed (%d) for %s[%d] while loading\n",
 			       ret, p->comm, p->pid);
-			goto err_disable_unlock;
+			goto err_disable_unlock_all;
 		}
 
 		put_task_struct(p);
@@ -3525,7 +3557,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 		preempt_enable();
 		spin_unlock_irq(&scx_tasks_lock);
 		ret = -EBUSY;
-		goto err_disable_unlock;
+		goto err_disable_unlock_all;
 	}
 
 	/*
@@ -3560,6 +3592,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	spin_unlock_irq(&scx_tasks_lock);
 	preempt_enable();
 	scx_cgroup_unlock();
+	cpus_read_unlock();
 	percpu_up_write(&scx_fork_rwsem);
 
 	if (!scx_ops_tryset_enable_state(SCX_OPS_ENABLED, SCX_OPS_ENABLING)) {
@@ -3568,24 +3601,24 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	}
 
 	if (scx_switch_all_req)
-		static_branch_enable_cpuslocked(&__scx_switched_all);
+		static_branch_enable(&__scx_switched_all);
 
-	cpus_read_unlock();
 	mutex_unlock(&scx_ops_enable_mutex);
 
 	scx_cgroup_config_knobs();
 
 	return 0;
 
-err_unlock:
+err:
 	mutex_unlock(&scx_ops_enable_mutex);
 	return ret;
 
-err_disable_unlock:
+err_disable_unlock_all:
 	scx_cgroup_unlock();
 	percpu_up_write(&scx_fork_rwsem);
-err_disable:
+err_disable_unlock_cpus:
 	cpus_read_unlock();
+err_disable:
 	mutex_unlock(&scx_ops_enable_mutex);
 	/* must be fully disabled before returning */
 	scx_ops_disable(SCX_EXIT_ERROR);
@@ -4101,13 +4134,20 @@ static void scx_dispatch_commit(struct task_struct *p, u64 dsq_id, u64 enq_flags
  * @enq_flags: SCX_ENQ_*
  *
  * Dispatch @p into the FIFO queue of the DSQ identified by @dsq_id. It is safe
- * to call this function spuriously. Can be called from ops.enqueue() and
- * ops.dispatch().
+ * to call this function spuriously. Can be called from ops.enqueue(),
+ * ops.select_cpu(), and ops.dispatch().
  *
- * When called from ops.enqueue(), it's for direct dispatch and @p must match
- * the task being enqueued. Also, %SCX_DSQ_LOCAL_ON can't be used to target the
- * local DSQ of a CPU other than the enqueueing one. Use ops.select_cpu() to be
- * on the target CPU in the first place.
+ * When called from ops.select_cpu() or ops.enqueue(), it's for direct dispatch
+ * and @p must match the task being enqueued. Also, %SCX_DSQ_LOCAL_ON can't be
+ * used to target the local DSQ of a CPU other than the enqueueing one. Use
+ * ops.select_cpu() to be on the target CPU in the first place.
+ *
+ * When called from ops.select_cpu(), @enq_flags and @dsp_id are stored, and @p
+ * will be directly dispatched to the corresponding dispatch queue after
+ * ops.select_cpu() returns. If @p is dispatched to SCX_DSQ_LOCAL, it will be
+ * dispatched to the local DSQ of the CPU returned by ops.select_cpu().
+ * @enq_flags are OR'd with the enqueue flags on the enqueue path before the
+ * task is dispatched.
  *
  * When called from ops.dispatch(), there are no restrictions on @p or @dsq_id
  * and this function can be called upto ops.dispatch_max_batch times to dispatch
