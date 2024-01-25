@@ -18,6 +18,10 @@ enum scx_internal_consts {
 	SCX_DSP_DFL_MAX_BATCH		= 32,
 	SCX_DSP_MAX_LOOPS		= 32,
 	SCX_WATCHDOG_MAX_TIMEOUT	= 30 * HZ,
+
+	SCX_EXIT_BT_LEN			= 64,
+	SCX_EXIT_MSG_LEN		= 1024,
+	SCX_EXIT_DUMP_LEN		= 32768,
 };
 
 enum scx_ops_enable_state {
@@ -113,7 +117,7 @@ struct static_key_false scx_has_op[SCX_OPI_END] =
 	{ [0 ... SCX_OPI_END-1] = STATIC_KEY_FALSE_INIT };
 
 static atomic_t scx_exit_kind = ATOMIC_INIT(SCX_EXIT_DONE);
-static struct scx_exit_info scx_exit_info;
+static struct scx_exit_info *scx_exit_info;
 
 static atomic_long_t scx_nr_rejected = ATOMIC_LONG_INIT(0);
 
@@ -193,6 +197,10 @@ struct scx_dsp_ctx {
 
 static DEFINE_PER_CPU(struct scx_dsp_ctx, scx_dsp_ctx);
 
+/* /sys/kernel/sched_ext interface */
+static struct kset *scx_kset;
+static struct kobject *scx_root_kobj;
+
 void scx_bpf_dispatch(struct task_struct *p, u64 dsq_id, u64 slice,
 		      u64 enq_flags);
 void scx_bpf_kick_cpu(s32 cpu, u64 flags);
@@ -205,6 +213,14 @@ struct scx_task_iter {
 };
 
 #define SCX_HAS_OP(op)	static_branch_likely(&scx_has_op[SCX_OP_IDX(op)])
+
+static long jiffies_delta_msecs(unsigned long at, unsigned long now)
+{
+	if (time_after(at, now))
+		return jiffies_to_msecs(at - now);
+	else
+		return -(long)jiffies_to_msecs(now - at);
+}
 
 /* if the highest set bit is N, return a mask with bits [N+1, 31] set */
 static u32 higher_bits(u32 flags)
@@ -2508,8 +2524,13 @@ void scx_post_fork(struct task_struct *p)
 void scx_cancel_fork(struct task_struct *p)
 {
 	if (scx_enabled()) {
+		struct rq *rq;
+		struct rq_flags rf;
+
+		rq = task_rq_lock(p, &rf);
 		WARN_ON_ONCE(scx_get_task_state(p) >= SCX_TASK_READY);
 		scx_ops_exit_task(p);
+		task_rq_unlock(rq, p, &rf);
 	}
 	percpu_up_read(&scx_fork_rwsem);
 }
@@ -3030,6 +3051,83 @@ static int scx_cgroup_init(void) { return 0; }
 static void scx_cgroup_config_knobs(void) {}
 #endif
 
+
+/********************************************************************************
+ * Sysfs interface and ops enable/disable.
+ */
+
+#define SCX_ATTR(_name)								\
+	static struct kobj_attribute scx_attr_##_name = {			\
+		.attr = { .name = __stringify(_name), .mode = 0444 },		\
+		.show = scx_attr_##_name##_show,				\
+	}
+
+static ssize_t scx_attr_state_show(struct kobject *kobj,
+				   struct kobj_attribute *ka, char *buf)
+{
+	return sysfs_emit(buf, "%s\n",
+			  scx_ops_enable_state_str[scx_ops_enable_state()]);
+}
+SCX_ATTR(state);
+
+static ssize_t scx_attr_switch_all_show(struct kobject *kobj,
+					struct kobj_attribute *ka, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", READ_ONCE(scx_switching_all));
+}
+SCX_ATTR(switch_all);
+
+static ssize_t scx_attr_nr_rejected_show(struct kobject *kobj,
+					 struct kobj_attribute *ka, char *buf)
+{
+	return sysfs_emit(buf, "%ld\n", atomic_long_read(&scx_nr_rejected));
+}
+SCX_ATTR(nr_rejected);
+
+static struct attribute *scx_global_attrs[] = {
+	&scx_attr_state.attr,
+	&scx_attr_switch_all.attr,
+	&scx_attr_nr_rejected.attr,
+	NULL,
+};
+
+static const struct attribute_group scx_global_attr_group = {
+	.attrs = scx_global_attrs,
+};
+
+static void scx_kobj_release(struct kobject *kobj)
+{
+	kfree(kobj);
+}
+
+static ssize_t scx_attr_ops_show(struct kobject *kobj,
+				 struct kobj_attribute *ka, char *buf)
+{
+	return sysfs_emit(buf, "%s\n", scx_ops.name);
+}
+SCX_ATTR(ops);
+
+static struct attribute *scx_sched_attrs[] = {
+	&scx_attr_ops.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(scx_sched);
+
+static const struct kobj_type scx_ktype = {
+	.release = scx_kobj_release,
+	.sysfs_ops = &kobj_sysfs_ops,
+	.default_groups = scx_sched_groups,
+};
+
+static int scx_uevent(const struct kobject *kobj, struct kobj_uevent_env *env)
+{
+	return add_uevent_var(env, "SCXOPS=%s", scx_ops.name);
+}
+
+static const struct kset_uevent_ops scx_uevent_ops = {
+	.uevent = scx_uevent,
+};
+
 /*
  * Used by sched_fork() and __setscheduler_prio() to pick the matching
  * sched_class. dl/rt are already handled.
@@ -3126,14 +3224,59 @@ static void scx_ops_bypass(bool bypass)
 	}
 }
 
+static void free_exit_info(struct scx_exit_info *ei)
+{
+	kfree(ei->dump);
+	kfree(ei->msg);
+	kfree(ei->bt);
+	kfree(ei);
+}
+
+static struct scx_exit_info *alloc_exit_info(void)
+{
+	struct scx_exit_info *ei;
+
+	ei = kzalloc(sizeof(*ei), GFP_KERNEL);
+	if (!ei)
+		return NULL;
+
+	ei->bt = kcalloc(sizeof(ei->bt[0]), SCX_EXIT_BT_LEN, GFP_KERNEL);
+	ei->msg = kzalloc(SCX_EXIT_MSG_LEN, GFP_KERNEL);
+	ei->dump = kzalloc(SCX_EXIT_DUMP_LEN, GFP_KERNEL);
+
+	if (!ei->bt || !ei->msg || !ei->dump) {
+		free_exit_info(ei);
+		return NULL;
+	}
+
+	return ei;
+}
+
+static const char *scx_exit_reason(enum scx_exit_kind kind)
+{
+	switch (kind) {
+	case SCX_EXIT_UNREG:
+		return "BPF scheduler unregistered";
+	case SCX_EXIT_SYSRQ:
+		return "disabled by sysrq-S";
+	case SCX_EXIT_ERROR:
+		return "runtime error";
+	case SCX_EXIT_ERROR_BPF:
+		return "scx_bpf_error";
+	case SCX_EXIT_ERROR_STALL:
+		return "runnable task stall";
+	default:
+		return "<UNKNOWN>";
+	}
+}
+
 static void scx_ops_disable_workfn(struct kthread_work *work)
 {
-	struct scx_exit_info *ei = &scx_exit_info;
+	struct scx_exit_info *ei = scx_exit_info;
 	struct scx_task_iter sti;
 	struct task_struct *p;
 	struct rhashtable_iter rht_iter;
 	struct scx_dispatch_q *dsq;
-	const char *reason;
 	int i, kind;
 
 	kind = atomic_read(&scx_exit_kind);
@@ -3148,31 +3291,10 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 		if (atomic_try_cmpxchg(&scx_exit_kind, &kind, SCX_EXIT_DONE))
 			break;
 	}
+	ei->kind = kind;
+	ei->reason = scx_exit_reason(ei->kind);
 
 	cancel_delayed_work_sync(&scx_watchdog_work);
-
-	switch (kind) {
-	case SCX_EXIT_UNREG:
-		reason = "BPF scheduler unregistered";
-		break;
-	case SCX_EXIT_SYSRQ:
-		reason = "disabled by sysrq-S";
-		break;
-	case SCX_EXIT_ERROR:
-		reason = "runtime error";
-		break;
-	case SCX_EXIT_ERROR_BPF:
-		reason = "scx_bpf_error";
-		break;
-	case SCX_EXIT_ERROR_STALL:
-		reason = "runnable task stall";
-		break;
-	default:
-		reason = "<UNKNOWN>";
-	}
-
-	ei->kind = kind;
-	strlcpy(ei->reason, reason, sizeof(ei->reason));
 
 	/* guarantee forward progress by bypassing scx_ops */
 	scx_ops_bypass(true);
@@ -3183,7 +3305,7 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 		break;
 	case SCX_OPS_DISABLED:
 		pr_warn("sched_ext: ops error detected without ops (%s)\n",
-			scx_exit_info.msg);
+			scx_exit_info->msg);
 		WARN_ON_ONCE(scx_ops_set_enable_state(SCX_OPS_DISABLED) !=
 			     SCX_OPS_DISABLING);
 		goto done;
@@ -3264,6 +3386,9 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 	if (scx_ops.exit)
 		SCX_CALL_OP(SCX_KF_UNLOCKED, exit, ei);
 
+	kobject_del(scx_root_kobj);
+	scx_root_kobj = NULL;
+
 	memset(&scx_ops, 0, sizeof(scx_ops));
 
 	rhashtable_walk_enter(&dsq_hash, &rht_iter);
@@ -3280,6 +3405,9 @@ static void scx_ops_disable_workfn(struct kthread_work *work)
 	free_percpu(scx_dsp_buf);
 	scx_dsp_buf = NULL;
 	scx_dsp_max_batch = 0;
+
+	free_exit_info(scx_exit_info);
+	scx_exit_info = NULL;
 
 	mutex_unlock(&scx_ops_enable_mutex);
 
@@ -3317,8 +3445,106 @@ static void scx_ops_disable(enum scx_exit_kind kind)
 	schedule_scx_ops_disable_work();
 }
 
+static void scx_dump_task(struct seq_buf *s, struct task_struct *p, char marker,
+			  unsigned long now)
+{
+	static unsigned long bt[SCX_EXIT_BT_LEN];
+	char dsq_id_buf[19] = "(n/a)";
+	unsigned long ops_state = atomic_long_read(&p->scx.ops_state);
+	unsigned int bt_len;
+	size_t avail, used;
+	char *buf;
+
+	if (p->scx.dsq)
+		scnprintf(dsq_id_buf, sizeof(dsq_id_buf), "0x%llx",
+			  (unsigned long long)p->scx.dsq->id);
+
+	seq_buf_printf(s, "\n %c%c %-16s: pid=%d state/flags=%u/0x%x dsq_flags=0x%x\n",
+		       marker, task_state_to_char(p), p->comm, p->pid,
+		       scx_get_task_state(p),
+		       p->scx.flags & ~SCX_TASK_STATE_MASK,
+		       p->scx.dsq_flags);
+	seq_buf_printf(s, "%*sops_state/qseq=%lu/%lu run_at=%+ldms\n", 22, "",
+		       ops_state & SCX_OPSS_STATE_MASK,
+		       ops_state >> SCX_OPSS_QSEQ_SHIFT,
+		       jiffies_delta_msecs(p->scx.runnable_at, now));
+	seq_buf_printf(s, "%*sdsq_id=%s sticky/holding_cpu=%d/%d\n", 22, "",
+		       dsq_id_buf, p->scx.sticky_cpu, p->scx.holding_cpu);
+
+	bt_len = stack_trace_save_tsk(p, bt, SCX_EXIT_BT_LEN, 1);
+
+	avail = seq_buf_get_buf(s, &buf);
+	used = stack_trace_snprint(buf, avail, bt, bt_len, 3);
+	seq_buf_commit(s, used < avail ? used : -1);
+}
+
+static void scx_dump_state(struct scx_exit_info *ei)
+{
+	const char trunc_marker[] = "\n\n~~~~ TRUNCATED ~~~~\n";
+	unsigned long now = jiffies;
+	struct seq_buf s;
+	size_t avail, used;
+	char *buf;
+	int cpu;
+
+	seq_buf_init(&s, ei->dump, SCX_EXIT_DUMP_LEN - sizeof(trunc_marker));
+
+	seq_buf_printf(&s, "%s[%d] triggered exit kind %d:\n  %s (%s)\n\n",
+		       current->comm, current->pid, ei->kind, ei->reason, ei->msg);
+	seq_buf_printf(&s, "Backtrace:\n");
+	avail = seq_buf_get_buf(&s, &buf);
+	used = stack_trace_snprint(buf, avail, ei->bt, ei->bt_len, 1);
+	seq_buf_commit(&s, used < avail ? used : -1);
+
+	seq_buf_printf(&s, "\nRunqueue states\n");
+	seq_buf_printf(&s, "---------------\n");
+
+	for_each_possible_cpu(cpu) {
+		struct rq *rq = cpu_rq(cpu);
+		struct rq_flags rf;
+		struct task_struct *p;
+
+		rq_lock(rq, &rf);
+
+		if (list_empty(&rq->scx.runnable_list) &&
+		    rq->curr->sched_class == &idle_sched_class)
+			goto next;
+
+		seq_buf_printf(&s, "\nCPU %-4d: nr_run=%u flags=0x%x cpu_rel=%d ops_qseq=%lu pnt_seq=%lu\n",
+			       cpu, rq->scx.nr_running, rq->scx.flags,
+			       rq->scx.cpu_released, rq->scx.ops_qseq,
+			       rq->scx.pnt_seq);
+		seq_buf_printf(&s, "          curr=%s[%d] class=%ps\n",
+			       rq->curr->comm, rq->curr->pid,
+			       rq->curr->sched_class);
+		if (!cpumask_empty(rq->scx.cpus_to_kick))
+			seq_buf_printf(&s, "  cpus_to_kick   : %*pb\n",
+				       cpumask_pr_args(rq->scx.cpus_to_kick));
+		if (!cpumask_empty(rq->scx.cpus_to_preempt))
+			seq_buf_printf(&s, "  cpus_to_preempt: %*pb\n",
+				       cpumask_pr_args(rq->scx.cpus_to_preempt));
+		if (!cpumask_empty(rq->scx.cpus_to_wait))
+			seq_buf_printf(&s, "  cpus_to_wait   : %*pb\n",
+				       cpumask_pr_args(rq->scx.cpus_to_wait));
+
+		if (rq->curr->sched_class == &ext_sched_class)
+			scx_dump_task(&s, rq->curr, '*', now);
+
+		list_for_each_entry(p, &rq->scx.runnable_list, scx.runnable_node)
+			scx_dump_task(&s, p, ' ', now);
+	next:
+		rq_unlock(rq, &rf);
+	}
+
+	if (seq_buf_has_overflowed(&s)) {
+		used = strlen(seq_buf_str(&s));
+		memcpy(ei->dump + used, trunc_marker, sizeof(trunc_marker));
+	}
+}
+
 static void scx_ops_error_irq_workfn(struct irq_work *irq_work)
 {
+	scx_dump_state(scx_exit_info);
 	schedule_scx_ops_disable_work();
 }
 
@@ -3327,18 +3553,25 @@ static DEFINE_IRQ_WORK(scx_ops_error_irq_work, scx_ops_error_irq_workfn);
 __printf(2, 3) void scx_ops_error_kind(enum scx_exit_kind kind,
 				       const char *fmt, ...)
 {
-	struct scx_exit_info *ei = &scx_exit_info;
+	struct scx_exit_info *ei = scx_exit_info;
 	int none = SCX_EXIT_NONE;
 	va_list args;
 
 	if (!atomic_try_cmpxchg(&scx_exit_kind, &none, kind))
 		return;
 
-	ei->bt_len = stack_trace_save(ei->bt, ARRAY_SIZE(ei->bt), 1);
+	ei->bt_len = stack_trace_save(ei->bt, SCX_EXIT_BT_LEN, 1);
 
 	va_start(args, fmt);
-	vscnprintf(ei->msg, ARRAY_SIZE(ei->msg), fmt, args);
+	vscnprintf(ei->msg, SCX_EXIT_MSG_LEN, fmt, args);
 	va_end(args);
+
+	/*
+	 * Set ei->kind and ->reason for scx_dump_state(). They'll be set again
+	 * in scx_ops_disable_workfn().
+	 */
+	ei->kind = kind;
+	ei->reason = scx_exit_reason(ei->kind);
 
 	irq_work_queue(&scx_ops_error_irq_work);
 }
@@ -3390,6 +3623,23 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 		goto err;
 	}
 
+	scx_exit_info = alloc_exit_info();
+	if (!scx_exit_info) {
+		ret = -ENOMEM;
+		goto err;
+	}
+
+	scx_root_kobj = kzalloc(sizeof(*scx_root_kobj), GFP_KERNEL);
+	if (!scx_root_kobj) {
+		ret = -ENOMEM;
+		goto err;
+	}
+
+	scx_root_kobj->kset = scx_kset;
+	ret = kobject_init_and_add(scx_root_kobj, &scx_ktype, NULL, "root");
+	if (ret < 0)
+		goto err;
+
 	/*
 	 * Set scx_ops, transition to PREPPING and clear exit info to arm the
 	 * disable path. Failure triggers full disabling from here on.
@@ -3399,7 +3649,6 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	WARN_ON_ONCE(scx_ops_set_enable_state(SCX_OPS_PREPPING) !=
 		     SCX_OPS_DISABLED);
 
-	memset(&scx_exit_info, 0, sizeof(scx_exit_info));
 	atomic_set(&scx_exit_kind, SCX_EXIT_NONE);
 	scx_warned_zero_slice = false;
 
@@ -3603,6 +3852,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	if (scx_switch_all_req)
 		static_branch_enable(&__scx_switched_all);
 
+	kobject_uevent(scx_root_kobj, KOBJ_ADD);
 	mutex_unlock(&scx_ops_enable_mutex);
 
 	scx_cgroup_config_knobs();
@@ -3610,6 +3860,14 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	return 0;
 
 err:
+	if (scx_root_kobj) {
+		kfree(scx_root_kobj);
+		scx_root_kobj = NULL;
+	}
+	if (scx_exit_info) {
+		free_exit_info(scx_exit_info);
+		scx_exit_info = NULL;
+	}
 	mutex_unlock(&scx_ops_enable_mutex);
 	return ret;
 
@@ -3626,36 +3884,6 @@ err_disable:
 	return ret;
 }
 
-#ifdef CONFIG_SCHED_DEBUG
-static int scx_debug_show(struct seq_file *m, void *v)
-{
-	mutex_lock(&scx_ops_enable_mutex);
-	seq_printf(m, "%-30s: %s\n", "ops", scx_ops.name);
-	seq_printf(m, "%-30s: %ld\n", "enabled", scx_enabled());
-	seq_printf(m, "%-30s: %d\n", "switching_all",
-		   READ_ONCE(scx_switching_all));
-	seq_printf(m, "%-30s: %ld\n", "switched_all", scx_switched_all());
-	seq_printf(m, "%-30s: %s\n", "enable_state",
-		   scx_ops_enable_state_str[scx_ops_enable_state()]);
-	seq_printf(m, "%-30s: %d\n", "bypassing", scx_ops_bypassing());
-	seq_printf(m, "%-30s: %lu\n", "nr_rejected",
-		   atomic_long_read(&scx_nr_rejected));
-	mutex_unlock(&scx_ops_enable_mutex);
-	return 0;
-}
-
-static int scx_debug_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, scx_debug_show, NULL);
-}
-
-const struct file_operations sched_ext_fops = {
-	.open		= scx_debug_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-#endif
 
 /********************************************************************************
  * bpf_struct_ops plumbing.
@@ -3666,15 +3894,80 @@ const struct file_operations sched_ext_fops = {
 
 extern struct btf *btf_vmlinux;
 static const struct btf_type *task_struct_type;
+static u32 task_struct_type_id;
+
+/* Make the 2nd argument of .dispatch a pointer that can be NULL. */
+static bool promote_dispatch_2nd_arg(int off, int size,
+                                     enum bpf_access_type type,
+                                     const struct bpf_prog *prog,
+                                     struct bpf_insn_access_aux *info)
+{
+	const struct bpf_struct_ops *st_ops;
+	const struct btf_member *member;
+        const struct btf_type *t;
+        u32 btf_id, member_idx;
+	const char *mname;
+
+        /* btf_id should be the type id of struct sched_ext_ops */
+	btf_id = prog->aux->attach_btf_id;
+	st_ops = bpf_struct_ops_find(btf_id);
+	if (!st_ops)
+                return false;
+
+        /* BTF type of struct sched_ext_ops */
+        t = st_ops->type;
+
+	member_idx = prog->expected_attach_type;
+	if (member_idx >= btf_type_vlen(t))
+                return false;
+
+        /*
+	 * Get the member name of this struct_ops program, which corresponds to
+	 * a field in struct sched_ext_ops. For example, the member name of the
+	 * dispatch struct_ops program (callback) is "dispatch".
+         */
+	member = &btf_type_member(t)[member_idx];
+	mname = btf_name_by_offset(btf_vmlinux, member->name_off);
+
+        /*
+	 * Check if it is the second argument of the function pointer at
+	 * "dispatch" in struct sched_ext_ops. The arguments of struct_ops
+	 * operators are sequential and 64-bit, so the second argument is at
+	 * offset sizeof(__u64).
+         */
+        if (strcmp(mname, "dispatch") == 0 &&
+            off == sizeof(__u64)) {
+                /*
+		 * The value is a pointer to a type (struct task_struct) given
+		 * by a BTF ID (PTR_TO_BTF_ID). It is trusted (PTR_TRUSTED),
+		 * however, can be a NULL (PTR_MAYBE_NULL). The BPF program
+		 * should check the pointer to make sure it is not NULL before
+		 * using it, or the verifier will reject the program.
+		 *
+		 * Longer term, this is something that should be addressed by
+		 * BTF, and be fully contained within the verifier.
+                 */
+                info->reg_type = PTR_MAYBE_NULL | PTR_TO_BTF_ID |
+                  PTR_TRUSTED;
+                info->btf = btf_vmlinux;
+                info->btf_id = task_struct_type_id;
+
+                return true;
+        }
+
+        return false;
+}
 
 static bool bpf_scx_is_valid_access(int off, int size,
 				    enum bpf_access_type type,
 				    const struct bpf_prog *prog,
 				    struct bpf_insn_access_aux *info)
 {
-	if (off < 0 || off >= sizeof(__u64) * MAX_BPF_FUNC_ARGS)
-		return false;
 	if (type != BPF_READ)
+		return false;
+        if (promote_dispatch_2nd_arg(off, size, type, prog, info))
+                return true;
+	if (off < 0 || off >= sizeof(__u64) * MAX_BPF_FUNC_ARGS)
 		return false;
 	if (off % size != 0)
 		return false;
@@ -3804,6 +4097,7 @@ static int bpf_scx_init(struct btf *btf)
 	if (type_id < 0)
 		return -EINVAL;
 	task_struct_type = btf_type_by_id(btf, type_id);
+        task_struct_type_id = type_id;
 
 	return 0;
 }
@@ -3839,6 +4133,11 @@ struct bpf_struct_ops bpf_sched_ext_ops = {
 	.validate = bpf_scx_validate,
 	.name = "sched_ext_ops",
 };
+
+
+/********************************************************************************
+ * System integration and init.
+ */
 
 static void sysrq_handle_sched_ext_reset(u8 key)
 {
@@ -3936,10 +4235,10 @@ void print_scx_info(const char *log_lvl, struct task_struct *p)
 
 	if (!copy_from_kernel_nofault(&runnable_at, &p->scx.runnable_at,
 				      sizeof(runnable_at)))
-		scnprintf(runnable_at_buf, sizeof(runnable_at_buf), "%+lldms",
-			  (s64)(runnable_at - jiffies) * (HZ / MSEC_PER_SEC));
+		scnprintf(runnable_at_buf, sizeof(runnable_at_buf), "%+ldms",
+			  jiffies_delta_msecs(runnable_at, jiffies));
 
-	/* Print everything onto one line to conserve console spce. */
+	/* print everything onto one line to conserve console space */
 	printk("%sSched_ext: %s (%s%s), task: runnable_at=%s",
 	       log_lvl, scx_ops.name, scx_ops_enable_state_str[state], all,
 	       runnable_at_buf);
@@ -4751,8 +5050,22 @@ static int __init scx_init(void)
 	}
 
 	ret = register_pm_notifier(&scx_pm_notifier);
-	if (ret)
-		pr_warn("sched_ext: Failed to register PM notifier (%d)\n", ret);
+	if (ret) {
+		pr_err("sched_ext: Failed to register PM notifier (%d)\n", ret);
+		return ret;
+	}
+
+	scx_kset = kset_create_and_add("sched_ext", &scx_uevent_ops, kernel_kobj);
+	if (!scx_kset) {
+		pr_err("sched_ext: Failed to create /sys/sched_ext\n");
+		return -ENOMEM;
+	}
+
+	ret = sysfs_create_group(&scx_kset->kobj, &scx_global_attr_group);
+	if (ret < 0) {
+		pr_err("sched_ext: Failed to add global attributes\n");
+		return ret;
+	}
 
 	return 0;
 }

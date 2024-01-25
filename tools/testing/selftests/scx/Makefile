@@ -161,6 +161,7 @@ auto-test-targets :=			\
 	ddsp_bogus_dsq_fail		\
 	ddsp_vtimelocal_fail		\
 	init_enable_count		\
+	maybe_null			\
 	minimal				\
 	select_cpu_dfl			\
 	select_cpu_dfl_nodispatch	\
@@ -182,13 +183,16 @@ $(SCXOBJ_DIR)/runner.o: runner.c | $(SCXOBJ_DIR)
 # compiling BPF object files only if one is present, as the wildcard Make
 # function doesn't support using implicit rules otherwise.
 .SECONDEXPANSION:
-$(testcase-targets): $(SCXOBJ_DIR)/%.o: %.c $(SCXOBJ_DIR)/runner.o $$(if $$(wildcard $$*.bpf.c), $(INCLUDE_DIR)/%.bpf.skel.h) | $(SCXOBJ_DIR)
+$(testcase-targets): $(SCXOBJ_DIR)/%.o: %.c $(SCXOBJ_DIR)/runner.o		\
+	$$(if $$(wildcard $$*.bpf.c), $(INCLUDE_DIR)/%.bpf.skel.h)		\
+	$$(if $$(wildcard $$*_fail.bpf.c), $(INCLUDE_DIR)/%_fail.bpf.skel.h)	\
+	| $(SCXOBJ_DIR)
 	$(eval test=$(patsubst %.o,%.c,$(notdir $@)))
 	$(CC) $(CFLAGS) -c $< -o $@ $(SCXOBJ_DIR)/runner.o
 
 runner: $(SCXOBJ_DIR)/runner.o $(BPFOBJ) $(testcase-targets)
 	@echo "$(testcase-targets)"
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 TEST_GEN_PROGS := runner
 
