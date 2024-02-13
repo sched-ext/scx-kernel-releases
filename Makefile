@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 6
 PATCHLEVEL = 7
-SUBLEVEL = 0
-EXTRAVERSION = -scx4
+SUBLEVEL = 4
+EXTRAVERSION = 0
 NAME = Hurr durr I'ma ninja sloth
 
 # *DOCUMENTATION*
