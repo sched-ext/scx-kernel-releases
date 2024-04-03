@@ -2165,10 +2165,14 @@ void activate_task(struct rq *rq, struct task_struct *p, int flags)
 
 void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 {
-	WRITE_ONCE(p->on_rq, (flags & DEQUEUE_SLEEP) ? 0 : TASK_ON_RQ_MIGRATING);
-	ASSERT_EXCLUSIVE_WRITER(p->on_rq);
+	bool sleep = flags & DEQUEUE_SLEEP;
 
-	dequeue_task(rq, p, flags);
+	if (dequeue_task(rq, p, flags)) {
+		WRITE_ONCE(p->on_rq, sleep ? 0 : TASK_ON_RQ_MIGRATING);
+		ASSERT_EXCLUSIVE_WRITER(p->on_rq);
+	} else {
+		SCHED_WARN_ON(!sleep); /* only sleep can fail */
+	}
 }
 
 static inline int __normal_prio(int policy, int rt_prio, int nice)
@@ -3880,12 +3884,17 @@ static int ttwu_runnable(struct task_struct *p, int wake_flags)
 
 	rq = __task_rq_lock(p, &rf);
 	if (task_on_rq_queued(p)) {
+		update_rq_clock(rq);
+		if (p->se.sched_delayed) {
+			/* mustn't run a delayed task */
+			SCHED_WARN_ON(task_on_cpu(rq, p));
+			enqueue_task(rq, p, ENQUEUE_DELAYED);
+		}
 		if (!task_on_cpu(rq, p)) {
 			/*
 			 * When on_rq && !on_cpu the task is preempted, see if
 			 * it should preempt the task that is current now.
 			 */
-			update_rq_clock(rq);
 			wakeup_preempt(rq, p, wake_flags);
 		}
 		ttwu_do_wakeup(p);
@@ -4274,11 +4283,16 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		 * case the whole 'p->on_rq && ttwu_runnable()' case below
 		 * without taking any locks.
 		 *
+		 * Specifically, given current runs ttwu() we must be before
+		 * schedule()'s deactivate_task(), as such this must not
+		 * observe sched_delayed.
+		 *
 		 * In particular:
 		 *  - we rely on Program-Order guarantees for all the ordering,
 		 *  - we're serialized against set_special_state() by virtue of
 		 *    it disabling IRQs (this allows not taking ->pi_lock).
 		 */
+		SCHED_WARN_ON(p->se.sched_delayed);
 		if (!ttwu_state_match(p, state, &success))
 			goto out;
 
