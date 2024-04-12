@@ -10,6 +10,7 @@
 
 #include <errno.h>
 #include <scx/common.h>
+#include <scx/compat.h>
 
 enum scx_test_status {
 	SCX_TEST_PASS = 0,
@@ -17,18 +18,7 @@ enum scx_test_status {
 	SCX_TEST_FAIL,
 };
 
-/* Copied from include/linux/sched/ext.h */
-enum scx_test_exit_kind {
-        SCX_EXIT_NONE,
-        SCX_EXIT_DONE,
-
-        SCX_EXIT_UNREG = 64,    /* BPF unregistration */
-        SCX_EXIT_SYSRQ,         /* requested by 'S' sysrq */
-
-	SCX_EXIT_ERROR = 1024,  /* runtime error, error msg contains details */
-	SCX_EXIT_ERROR_BPF,     /* ERROR but triggered through scx_bpf_error() */
-	SCX_EXIT_ERROR_STALL,   /* watchdog detected stalled runnable tasks */
-};
+#define EXIT_KIND(__ent) __COMPAT_ENUM_OR_ZERO("scx_exit_kind", #__ent)
 
 struct scx_test {
 	/**
@@ -119,5 +109,23 @@ void scx_test_register(struct scx_test *test);
 				   #_x, #_y, (u64)(_x), (u64)(_y))
 #define SCX_ASSERT(_x) SCX_FAIL_IF(!(_x), "Expected %s to be true (%lu)",		\
 				   #_x, (u64)(_x))
+
+#define SCX_ECODE_VAL(__ecode) ({						\
+        u64 __val = 0;								\
+	bool __found = false;							\
+										\
+	__found = __COMPAT_read_enum("scx_exit_code", #__ecode, &__val);	\
+	SCX_ASSERT(__found);							\
+	(s64)__val;								\
+})
+
+#define SCX_KIND_VAL(__kind) ({							\
+        u64 __val = 0;								\
+	bool __found = false;							\
+										\
+	__found = __COMPAT_read_enum("scx_exit_kind", #__kind, &__val);		\
+	SCX_ASSERT(__found);							\
+	__val;									\
+})
 
 #endif  // # __SCX_TEST_H__

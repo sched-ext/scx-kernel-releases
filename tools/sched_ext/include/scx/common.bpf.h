@@ -28,51 +28,82 @@ static inline void ___vmlinux_h_sanity_check___(void)
 		       "bpftool generated vmlinux.h is missing high bits for 64bit enums, upgrade clang and pahole");
 }
 
-void scx_bpf_error_bstr(char *fmt, unsigned long long *data, u32 data_len) __ksym;
-
-static inline __attribute__((format(printf, 1, 2)))
-void ___scx_bpf_error_format_checker(const char *fmt, ...) {}
-
-/*
- * scx_bpf_error() wraps the scx_bpf_error_bstr() kfunc with variadic arguments
- * instead of an array of u64. Note that __param[] must have at least one
- * element to keep the verifier happy.
- */
-#define scx_bpf_error(fmt, args...)						\
-({										\
-	static char ___fmt[] = fmt;						\
-	unsigned long long ___param[___bpf_narg(args) ?: 1] = {};		\
-										\
-	_Pragma("GCC diagnostic push")						\
-	_Pragma("GCC diagnostic ignored \"-Wint-conversion\"")			\
-	___bpf_fill(___param, args);						\
-	_Pragma("GCC diagnostic pop")						\
-										\
-	scx_bpf_error_bstr(___fmt, ___param, sizeof(___param));			\
-										\
-	___scx_bpf_error_format_checker(fmt, ##args);				\
-})
-
 s32 scx_bpf_create_dsq(u64 dsq_id, s32 node) __ksym;
-bool scx_bpf_consume(u64 dsq_id) __ksym;
 void scx_bpf_dispatch(struct task_struct *p, u64 dsq_id, u64 slice, u64 enq_flags) __ksym;
 void scx_bpf_dispatch_vtime(struct task_struct *p, u64 dsq_id, u64 slice, u64 vtime, u64 enq_flags) __ksym;
 u32 scx_bpf_dispatch_nr_slots(void) __ksym;
 void scx_bpf_dispatch_cancel(void) __ksym;
+bool scx_bpf_consume(u64 dsq_id) __ksym;
+u32 scx_bpf_reenqueue_local(void) __ksym;
 void scx_bpf_kick_cpu(s32 cpu, u64 flags) __ksym;
 s32 scx_bpf_dsq_nr_queued(u64 dsq_id) __ksym;
 bool scx_bpf_test_and_clear_cpu_idle(s32 cpu) __ksym;
 s32 scx_bpf_pick_idle_cpu(const cpumask_t *cpus_allowed, u64 flags) __ksym;
 s32 scx_bpf_pick_any_cpu(const cpumask_t *cpus_allowed, u64 flags) __ksym;
+void scx_bpf_destroy_dsq(u64 dsq_id) __ksym;
+s32 scx_bpf_select_cpu_dfl(struct task_struct *p, s32 prev_cpu, u64 wake_flags, bool *is_idle) __ksym;
+void scx_bpf_exit_bstr(s64 exit_code, char *fmt,
+		       unsigned long long *data, u32 data__sz) __ksym;
+void scx_bpf_error_bstr(char *fmt, unsigned long long *data, u32 data_len) __ksym;
+u32 scx_bpf_nr_cpu_ids(void) __ksym;
+u32 scx_bpf_cpuperf_cap(s32 cpu) __ksym;
+u32 scx_bpf_cpuperf_cur(s32 cpu) __ksym;
+void scx_bpf_cpuperf_set(s32 cpu, u32 perf) __ksym;
+const struct cpumask *scx_bpf_get_possible_cpumask(void) __ksym;
+const struct cpumask *scx_bpf_get_online_cpumask(void) __ksym;
+void scx_bpf_put_cpumask(const struct cpumask *cpumask) __ksym;
 const struct cpumask *scx_bpf_get_idle_cpumask(void) __ksym;
 const struct cpumask *scx_bpf_get_idle_smtmask(void) __ksym;
 void scx_bpf_put_idle_cpumask(const struct cpumask *cpumask) __ksym;
-void scx_bpf_destroy_dsq(u64 dsq_id) __ksym;
-s32 scx_bpf_select_cpu_dfl(struct task_struct *p, s32 prev_cpu, u64 wake_flags, bool *is_idle) __ksym;
 bool scx_bpf_task_running(const struct task_struct *p) __ksym;
 s32 scx_bpf_task_cpu(const struct task_struct *p) __ksym;
 struct cgroup *scx_bpf_task_cgroup(struct task_struct *p) __ksym;
-u32 scx_bpf_reenqueue_local(void) __ksym;
+
+static inline __attribute__((format(printf, 1, 2)))
+void ___scx_bpf_exit_format_checker(const char *fmt, ...) {}
+
+/*
+ * Helper macro for initializing the fmt and variadic argument inputs to both
+ * bstr exit kfuncs. Callers to this function should use ___fmt and ___param to
+ * refer to the initialized list of inputs to the bstr kfunc.
+ */
+#define scx_bpf_exit_preamble(fmt, args...)				\
+	static char ___fmt[] = fmt;					\
+	/*								\
+	 * Note that __param[] must have at least one			\
+	 * element to keep the verifier happy.				\
+	 */								\
+	unsigned long long ___param[___bpf_narg(args) ?: 1] = {};	\
+									\
+	_Pragma("GCC diagnostic push")					\
+	_Pragma("GCC diagnostic ignored \"-Wint-conversion\"")		\
+	___bpf_fill(___param, args);					\
+	_Pragma("GCC diagnostic pop")					\
+
+/*
+ * scx_bpf_exit() wraps the scx_bpf_exit_bstr() kfunc with variadic arguments
+ * instead of an array of u64. Using this macro will cause the scheduler to
+ * exit cleanly with the specified exit code being passed to user space.
+ */
+#define scx_bpf_exit(code, fmt, args...)					\
+({										\
+	scx_bpf_exit_preamble(fmt, args)					\
+	scx_bpf_exit_bstr(code, ___fmt, ___param, sizeof(___param));		\
+	___scx_bpf_exit_format_checker(fmt, ##args);				\
+})
+
+/*
+ * scx_bpf_error() wraps the scx_bpf_error_bstr() kfunc with variadic arguments
+ * instead of an array of u64. Invoking this macro will cause the scheduler to
+ * exit in an erroneous state, with diagnostic information being passed to the
+ * user.
+ */
+#define scx_bpf_error(fmt, args...)						\
+({										\
+	scx_bpf_exit_preamble(fmt, args)					\
+	scx_bpf_error_bstr(___fmt, ___param, sizeof(___param));			\
+	___scx_bpf_exit_format_checker(fmt, ##args);				\
+})
 
 #define BPF_STRUCT_OPS(name, args...)						\
 SEC("struct_ops/"#name)								\
@@ -198,6 +229,9 @@ int bpf_rbtree_add_impl(struct bpf_rb_root *root, struct bpf_rb_node *node,
 #define bpf_rbtree_add(head, node, less) bpf_rbtree_add_impl(head, node, less, NULL, 0)
 
 struct bpf_rb_node *bpf_rbtree_first(struct bpf_rb_root *root) __ksym;
+
+extern void *bpf_refcount_acquire_impl(void *kptr, void *meta) __ksym;
+#define bpf_refcount_acquire(kptr) bpf_refcount_acquire_impl(kptr, NULL)
 
 /* task */
 struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
