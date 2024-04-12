@@ -121,7 +121,7 @@ static bool get_datasec_ident(const char *sec_name, char *buf, size_t buf_sz)
 	int i, n;
 
 	/* recognize hard coded LLVM section name */
-	if (strcmp(sec_name, ".arena.1") == 0) {
+	if (strcmp(sec_name, ".addr_space.1") == 0) {
 		/* this is the name to use in skeleton */
 		snprintf(buf, buf_sz, "arena");
 		return true;
@@ -1131,7 +1131,8 @@ static void gen_st_ops_shadow_init(struct btf *btf, struct bpf_object *obj)
 			continue;
 		codegen("\
 			\n\
-				obj->struct_ops.%1$s = bpf_map__initial_value(obj->maps.%1$s, NULL);\n\
+				obj->struct_ops.%1$s = (typeof(obj->struct_ops.%1$s))\n\
+					bpf_map__initial_value(obj->maps.%1$s, NULL);\n\
 			\n\
 			", ident);
 	}

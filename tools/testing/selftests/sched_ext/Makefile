@@ -165,10 +165,13 @@ auto-test-targets :=			\
 	enq_select_cpu_fails		\
 	ddsp_bogus_dsq_fail		\
 	ddsp_vtimelocal_fail		\
+	exit				\
+	hotplug				\
 	init_enable_count		\
 	maximal				\
 	maybe_null			\
 	minimal				\
+	prog_run			\
 	reload_loop			\
 	select_cpu_dfl			\
 	select_cpu_dfl_nodispatch	\
@@ -193,7 +196,10 @@ $(testcase-targets): $(SCXOBJ_DIR)/%.o: %.c $(SCXOBJ_DIR)/runner.o $(all_test_bp
 	$(eval test=$(patsubst %.o,%.c,$(notdir $@)))
 	$(CC) $(CFLAGS) -c $< -o $@ $(SCXOBJ_DIR)/runner.o
 
-runner: $(SCXOBJ_DIR)/runner.o $(BPFOBJ) $(testcase-targets)
+$(SCXOBJ_DIR)/util.o: util.c | $(SCXOBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+runner: $(SCXOBJ_DIR)/runner.o $(SCXOBJ_DIR)/util.o $(BPFOBJ) $(testcase-targets)
 	@echo "$(testcase-targets)"
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 

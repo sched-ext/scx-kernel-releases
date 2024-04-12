@@ -8,6 +8,9 @@
 #define __SCX_COMPAT_H
 
 #include <bpf/btf.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 struct btf *__COMPAT_vmlinux_btf __attribute__((weak));
 
@@ -28,7 +31,7 @@ static inline bool __COMPAT_read_enum(const char *type, const char *name, u64 *v
 
 	__COMPAT_load_vmlinux_btf();
 
-	tid = btf__find_by_name_kind(__COMPAT_vmlinux_btf, type, BTF_KIND_ENUM);
+	tid = btf__find_by_name(__COMPAT_vmlinux_btf, type);
 	if (tid < 0)
 		return false;
 
@@ -106,36 +109,68 @@ static inline bool __COMPAT_struct_has_field(const char *type, const char *field
 #define __COMPAT_SCX_OPS_SWITCH_PARTIAL						\
 	__COMPAT_ENUM_OR_ZERO("scx_ops_flags", "SCX_OPS_SWITCH_PARTIAL")
 
+static inline long scx_hotplug_seq(void)
+{
+	int fd;
+	char buf[32];
+	ssize_t len;
+	long val;
+
+	fd = open("/sys/kernel/sched_ext/hotplug_seq", O_RDONLY);
+	if (fd < 0)
+		return -ENOENT;
+
+	len = read(fd, buf, sizeof(buf) - 1);
+	SCX_BUG_ON(len <= 0, "read failed (%ld)", len);
+	buf[len] = 0;
+	close(fd);
+
+	val = strtoul(buf, NULL, 10);
+	SCX_BUG_ON(val < 0, "invalid num hotplug events: %lu", val);
+
+	return val;
+}
+
 /*
  * struct sched_ext_ops can change over time. If compat.bpf.h::SCX_OPS_DEFINE()
  * is used to define ops and compat.h::SCX_OPS_LOAD/ATTACH() are used to load
  * and attach it, backward compatibility is automatically maintained where
  * reasonable.
  *
- * - sched_ext_ops.exit_dump_len was added later. On kernels which don't support
- *   it, the value is ignored and a warning is triggered if the value is
- *   requested to be non-zero.
+ * The following values were added in newer kernels:
+ *
+ * - sched_ext_ops.exit_dump_len
+ *	o If nonzero and running on an older kernel, the value is set to zero
+ *	  and a warning is emitted
+ *
+ * - sched_ext_ops.hotplug_sqn
+ *	o If nonzero and running on an older kernel, the scheduler will fail to
+ *	  load
  */
+#define SCX_OPS_OPEN(__ops_name, __scx_name) ({					\
+	struct __scx_name *__skel;						\
+										\
+	__skel = __scx_name##__open();						\
+	SCX_BUG_ON(!__skel, "Could not open " #__scx_name);			\
+										\
+	if (__COMPAT_struct_has_field("sched_ext_ops", "hotplug_seq"))		\
+		__skel->struct_ops.__ops_name->hotplug_seq = scx_hotplug_seq();	\
+	__skel; 								\
+})
+
 #define SCX_OPS_LOAD(__skel, __ops_name, __scx_name, __uei_name) ({		\
 	UEI_SET_SIZE(__skel, __ops_name, __uei_name);				\
-	if (__COMPAT_struct_has_field("sched_ext_ops", "exit_dump_len")) {	\
-		bpf_map__set_autocreate((__skel)->maps.__ops_name, true);	\
-		bpf_map__set_autocreate((__skel)->maps.__ops_name##___no_exit_dump_len, false); \
-	} else {								\
-		if ((__skel)->struct_ops.__ops_name->exit_dump_len)		\
-			fprintf(stderr, "WARNING: kernel doesn't support setting exit dump len\n"); \
-		bpf_map__set_autocreate((__skel)->maps.__ops_name, false);	\
-		bpf_map__set_autocreate((__skel)->maps.__ops_name##___no_exit_dump_len, true); \
+	if (__COMPAT_struct_has_field("sched_ext_ops", "exit_dump_len") &&	\
+	    (__skel)->struct_ops.__ops_name->exit_dump_len) {			\
+		fprintf(stderr, "WARNING: kernel doesn't support setting exit dump len\n"); \
+		(__skel)->struct_ops.__ops_name->exit_dump_len = 0;	\
 	}									\
 	SCX_BUG_ON(__scx_name##__load((__skel)), "Failed to load skel");	\
 })
 
 #define SCX_OPS_ATTACH(__skel, __ops_name) ({					\
 	struct bpf_link *__link;						\
-	if (__COMPAT_struct_has_field("sched_ext_ops", "exit_dump_len"))	\
-		__link = bpf_map__attach_struct_ops((__skel)->maps.__ops_name);	\
-	else									\
-		__link = bpf_map__attach_struct_ops((__skel)->maps.__ops_name##___no_exit_dump_len); \
+	__link = bpf_map__attach_struct_ops((__skel)->maps.__ops_name);		\
 	SCX_BUG_ON(!__link, "Failed to attach struct_ops");			\
 	__link;									\
 })

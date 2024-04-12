@@ -18,6 +18,7 @@ enum uei_sizes {
 
 struct user_exit_info {
 	int		kind;
+	s64		exit_code;
 	char		reason[UEI_REASON_LEN];
 	char		msg[UEI_MSG_LEN];
 };
@@ -39,6 +40,8 @@ struct user_exit_info {
 				  sizeof(__uei_name.msg), (__ei)->msg);		\
 	bpf_probe_read_kernel_str(__uei_name##_dump,				\
 				  __uei_name##_dump_len, (__ei)->dump);		\
+	if (bpf_core_field_exists((__ei)->exit_code))				\
+		__uei_name.exit_code = (__ei)->exit_code;			\
 	/* use __sync to force memory barrier */				\
 	__sync_val_compare_and_swap(&__uei_name.kind, __uei_name.kind,		\
 				    (__ei)->kind);				\
@@ -61,6 +64,17 @@ struct user_exit_info {
 	__sync_val_compare_and_swap(&(__skel)->data->__uei_name.kind, -1, -1);	\
 })
 
+#define UEI_KIND(__skel, __uei_name) ((__skel)->data->__uei_name.kind)
+
+#define ECODE_USER_MASK		((1LLU << 32) - 1)
+#define ECODE_SYS_ACT_MASK	(((1LLU << 48) - 1) ^ ECODE_USER_MASK)
+#define ECODE_SYS_RSN_MASK	(~0LLU ^ (ECODE_SYS_ACT_MASK | ECODE_USER_MASK))
+
+#define UEI_ECODE(__skel, __uei_name) (__skel)->data->__uei_name.exit_code
+#define UEI_ECODE_SYS_ACT(__skel, __uei_name) (UEI_ECODE(__skel, __uei_name) & ECODE_SYS_ACT_MASK)
+#define UEI_ECODE_SYS_RSN(__skel, __uei_name) (UEI_ECODE(__skel, __uei_name) & ECODE_SYS_RSN_MASK)
+#define UEI_ECODE_USER(__skel, __uei_name) (UEI_ECODE(__skel, __uei_name) & ECODE_USER_MASK)
+
 #define UEI_REPORT(__skel, __uei_name) ({					\
 	struct user_exit_info *__uei = &(__skel)->data->__uei_name;		\
 	char *__uei_dump = (__skel)->data_##__uei_name##_dump->__uei_name##_dump; \
@@ -74,6 +88,15 @@ struct user_exit_info {
 	if (__uei->msg[0] != '\0')						\
 		fprintf(stderr, " (%s)", __uei->msg);				\
 	fputs("\n", stderr);							\
+})
+
+#define UEI_RESET(__skel, __uei_name) ({					\
+	struct user_exit_info *__uei = &(__skel)->data->__uei_name;		\
+	char *__uei_dump = (__skel)->data_##__uei_name##_dump->__uei_name##_dump; \
+	size_t __uei_dump_len = (__skel)->rodata->__uei_name##_dump_len;	\
+										\
+	memset(__uei, 0, sizeof(struct user_exit_info));			\
+	memset(__uei_dump, 0, __uei_dump_len);					\
 })
 
 #endif	/* __bpf__ */
