@@ -4,13 +4,60 @@
 ##############################################################################
 # Defines
 
-# Kselftest framework requirement - SKIP code is 4.
+: "${WAIT_TIMEOUT:=20}"
+
+BUSYWAIT_TIMEOUT=$((WAIT_TIMEOUT * 1000)) # ms
+
+# Kselftest framework constants.
+ksft_pass=0
+ksft_fail=1
+ksft_xfail=2
 ksft_skip=4
+
 # namespace list created by setup_ns
 NS_LIST=""
 
 ##############################################################################
 # Helpers
+
+__ksft_status_merge()
+{
+	local a=$1; shift
+	local b=$1; shift
+	local -A weights
+	local weight=0
+
+	for i in "$@"; do
+		weights[$i]=$((weight++))
+	done
+
+	if [[ ${weights[$a]} > ${weights[$b]} ]]; then
+		echo "$a"
+		return 0
+	else
+		echo "$b"
+		return 1
+	fi
+}
+
+ksft_status_merge()
+{
+	local a=$1; shift
+	local b=$1; shift
+
+	__ksft_status_merge "$a" "$b" \
+		$ksft_pass $ksft_xfail $ksft_skip $ksft_fail
+}
+
+ksft_exit_status_merge()
+{
+	local a=$1; shift
+	local b=$1; shift
+
+	__ksft_status_merge "$a" "$b" \
+		$ksft_xfail $ksft_pass $ksft_skip $ksft_fail
+}
+
 busywait()
 {
 	local timeout=$1; shift
@@ -48,7 +95,7 @@ cleanup_ns()
 
 	for ns in "$@"; do
 		ip netns delete "${ns}" &> /dev/null
-		if ! busywait 2 ip netns list \| grep -vq "^$ns$" &> /dev/null; then
+		if ! busywait $BUSYWAIT_TIMEOUT ip netns list \| grep -vq "^$ns$" &> /dev/null; then
 			echo "Warn: Failed to remove namespace $ns"
 			ret=1
 		fi
