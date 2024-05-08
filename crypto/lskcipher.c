@@ -212,12 +212,13 @@ static int crypto_lskcipher_crypt_sg(struct skcipher_request *req,
 
 	ivsize = crypto_lskcipher_ivsize(tfm);
 	ivs = PTR_ALIGN(ivs, crypto_skcipher_alignmask(skcipher) + 1);
-	memcpy(ivs, req->iv, ivsize);
 
 	flags = req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP;
 
 	if (req->base.flags & CRYPTO_SKCIPHER_REQ_CONT)
 		flags |= CRYPTO_LSKCIPHER_FLAG_CONT;
+	else
+		memcpy(ivs, req->iv, ivsize);
 
 	if (!(req->base.flags & CRYPTO_SKCIPHER_REQ_NOTFINAL))
 		flags |= CRYPTO_LSKCIPHER_FLAG_FINAL;
@@ -233,7 +234,8 @@ static int crypto_lskcipher_crypt_sg(struct skcipher_request *req,
 		flags |= CRYPTO_LSKCIPHER_FLAG_CONT;
 	}
 
-	memcpy(req->iv, ivs, ivsize);
+	if (flags & CRYPTO_LSKCIPHER_FLAG_FINAL)
+		memcpy(req->iv, ivs, ivsize);
 
 	return err;
 }

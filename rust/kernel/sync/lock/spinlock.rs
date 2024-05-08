@@ -17,7 +17,6 @@ macro_rules! new_spinlock {
             $inner, $crate::optional_name!($($name)?), $crate::static_lock_class!())
     };
 }
-pub use new_spinlock;
 
 /// A spinlock.
 ///
@@ -34,7 +33,7 @@ pub use new_spinlock;
 /// contains an inner struct (`Inner`) that is protected by a spinlock.
 ///
 /// ```
-/// use kernel::sync::{new_spinlock, SpinLock};
+/// use kernel::{init::InPlaceInit, init::PinInit, new_spinlock, pin_init, sync::SpinLock};
 ///
 /// struct Inner {
 ///     a: u32,
@@ -113,7 +112,7 @@ unsafe impl super::Backend for SpinLockBackend {
 
     unsafe fn unlock(ptr: *mut Self::State, _guard_state: &Self::GuardState) {
         // SAFETY: The safety requirements of this function ensure that `ptr` is valid and that the
-        // caller is the owner of the spinlock.
+        // caller is the owner of the mutex.
         unsafe { bindings::spin_unlock(ptr) }
     }
 }

@@ -16,6 +16,11 @@
 #include <linux/mutex.h>
 
 struct nullb_cmd {
+	union {
+		struct request *rq;
+		struct bio *bio;
+	};
+	unsigned int tag;
 	blk_status_t error;
 	bool fake_timeout;
 	struct nullb_queue *nq;
@@ -23,11 +28,16 @@ struct nullb_cmd {
 };
 
 struct nullb_queue {
+	unsigned long *tag_map;
+	wait_queue_head_t wait;
+	unsigned int queue_depth;
 	struct nullb_device *dev;
 	unsigned int requeue_selection;
 
 	struct list_head poll_list;
 	spinlock_t poll_lock;
+
+	struct nullb_cmd *cmds;
 };
 
 struct nullb_zone {
@@ -48,6 +58,13 @@ struct nullb_zone {
 	sector_t wp;
 	unsigned int len;
 	unsigned int capacity;
+};
+
+/* Queue modes */
+enum {
+	NULL_Q_BIO	= 0,
+	NULL_Q_RQ	= 1,
+	NULL_Q_MQ	= 2,
 };
 
 struct nullb_device {
@@ -102,7 +119,6 @@ struct nullb_device {
 	bool zoned; /* if device is zoned */
 	bool virt_boundary; /* virtual boundary on/off for the device */
 	bool no_sched; /* no IO scheduler for the device */
-	bool shared_tags; /* share tag set between devices for blk-mq */
 	bool shared_tag_bitmap; /* use hostwide shared tags */
 };
 
@@ -114,12 +130,14 @@ struct nullb {
 	struct gendisk *disk;
 	struct blk_mq_tag_set *tag_set;
 	struct blk_mq_tag_set __tag_set;
+	unsigned int queue_depth;
 	atomic_long_t cur_bytes;
 	struct hrtimer bw_timer;
 	unsigned long cache_flush_pos;
 	spinlock_t lock;
 
 	struct nullb_queue *queues;
+	unsigned int nr_queues;
 	char disk_name[DISK_NAME_LEN];
 };
 
@@ -129,7 +147,7 @@ blk_status_t null_process_cmd(struct nullb_cmd *cmd, enum req_op op,
 			      sector_t sector, unsigned int nr_sectors);
 
 #ifdef CONFIG_BLK_DEV_ZONED
-int null_init_zoned_dev(struct nullb_device *dev, struct queue_limits *lim);
+int null_init_zoned_dev(struct nullb_device *dev, struct request_queue *q);
 int null_register_zoned_dev(struct nullb *nullb);
 void null_free_zoned_dev(struct nullb_device *dev);
 int null_report_zones(struct gendisk *disk, sector_t sector,
@@ -142,7 +160,7 @@ ssize_t zone_cond_store(struct nullb_device *dev, const char *page,
 			size_t count, enum blk_zone_cond cond);
 #else
 static inline int null_init_zoned_dev(struct nullb_device *dev,
-		struct queue_limits *lim)
+				      struct request_queue *q)
 {
 	pr_err("CONFIG_BLK_DEV_ZONED not enabled\n");
 	return -EINVAL;

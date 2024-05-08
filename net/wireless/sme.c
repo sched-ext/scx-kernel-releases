@@ -209,8 +209,7 @@ static int cfg80211_conn_do_work(struct wireless_dev *wdev,
 		if (!req.bss) {
 			err = -ENOENT;
 		} else {
-			err = cfg80211_mlme_assoc(rdev, wdev->netdev,
-						  &req, NULL);
+			err = cfg80211_mlme_assoc(rdev, wdev->netdev, &req);
 			cfg80211_put_bss(&rdev->wiphy, req.bss);
 		}
 

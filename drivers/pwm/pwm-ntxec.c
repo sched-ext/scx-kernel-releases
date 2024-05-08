@@ -25,11 +25,12 @@
 
 struct ntxec_pwm {
 	struct ntxec *ec;
+	struct pwm_chip chip;
 };
 
 static struct ntxec_pwm *ntxec_pwm_from_chip(struct pwm_chip *chip)
 {
-	return pwmchip_get_drvdata(chip);
+	return container_of(chip, struct ntxec_pwm, chip);
 }
 
 #define NTXEC_REG_AUTO_OFF_HI	0xa1
@@ -140,13 +141,16 @@ static int ntxec_pwm_probe(struct platform_device *pdev)
 
 	device_set_of_node_from_dev(&pdev->dev, pdev->dev.parent);
 
-	chip = devm_pwmchip_alloc(&pdev->dev, 1, sizeof(*priv));
-	if (IS_ERR(chip))
-		return PTR_ERR(chip);
-	priv = ntxec_pwm_from_chip(chip);
+	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
 
 	priv->ec = ec;
+
+	chip = &priv->chip;
+	chip->dev = &pdev->dev;
 	chip->ops = &ntxec_pwm_ops;
+	chip->npwm = 1;
 
 	return devm_pwmchip_add(&pdev->dev, chip);
 }

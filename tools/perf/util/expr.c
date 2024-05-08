@@ -500,25 +500,7 @@ double expr__has_event(const struct expr_parse_ctx *ctx, bool compute_ids, const
 	tmp = evlist__new();
 	if (!tmp)
 		return NAN;
-
-	if (strchr(id, '@')) {
-		char *tmp_id, *p;
-
-		tmp_id = strdup(id);
-		if (!tmp_id) {
-			ret = NAN;
-			goto out;
-		}
-		p = strchr(tmp_id, '@');
-		*p = '/';
-		p = strrchr(tmp_id, '@');
-		*p = '/';
-		ret = parse_event(tmp, tmp_id) ? 0 : 1;
-		free(tmp_id);
-	} else {
-		ret = parse_event(tmp, id) ? 0 : 1;
-	}
-out:
+	ret = parse_event(tmp, id) ? 0 : 1;
 	evlist__delete(tmp);
 	return ret;
 }

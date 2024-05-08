@@ -21,12 +21,10 @@
 #include <asm/mpu.h>
 #include <asm/procinfo.h>
 #include <asm/suspend.h>
+#include <asm/vdso_datapage.h>
 #include <asm/hardware/cache-l2x0.h>
 #include <linux/kbuild.h>
 #include <linux/arm-smccc.h>
-
-#include <vdso/datapage.h>
-
 #include "signal.h"
 
 /*

@@ -13,7 +13,6 @@
 #include "btree_iter.h"
 #include "btree_locking.h"
 #include "btree_update.h"
-#include "btree_update_interior.h"
 #include "buckets.h"
 #include "debug.h"
 #include "error.h"
@@ -138,7 +137,7 @@ void __bch2_btree_verify(struct bch_fs *c, struct btree *b)
 	mutex_lock(&c->verify_lock);
 
 	if (!c->verify_ondisk) {
-		c->verify_ondisk = kvmalloc(btree_buf_bytes(b), GFP_KERNEL);
+		c->verify_ondisk = kvpmalloc(btree_buf_bytes(b), GFP_KERNEL);
 		if (!c->verify_ondisk)
 			goto out;
 	}
@@ -171,7 +170,7 @@ void __bch2_btree_verify(struct bch_fs *c, struct btree *b)
 		struct printbuf buf = PRINTBUF;
 
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
-		bch2_fs_fatal_error(c, ": btree node verify failed for: %s\n", buf.buf);
+		bch2_fs_fatal_error(c, "btree node verify failed for : %s\n", buf.buf);
 		printbuf_exit(&buf);
 	}
 out:
@@ -200,7 +199,7 @@ void bch2_btree_node_ondisk_to_text(struct printbuf *out, struct bch_fs *c,
 		return;
 	}
 
-	n_ondisk = kvmalloc(btree_buf_bytes(b), GFP_KERNEL);
+	n_ondisk = kvpmalloc(btree_buf_bytes(b), GFP_KERNEL);
 	if (!n_ondisk) {
 		prt_printf(out, "memory allocation failure\n");
 		goto out;
@@ -294,7 +293,7 @@ void bch2_btree_node_ondisk_to_text(struct printbuf *out, struct bch_fs *c,
 out:
 	if (bio)
 		bio_put(bio);
-	kvfree(n_ondisk);
+	kvpfree(n_ondisk, btree_buf_bytes(b));
 	percpu_ref_put(&ca->io_ref);
 }
 
@@ -669,7 +668,7 @@ static ssize_t bch2_journal_pins_read(struct file *file, char __user *buf,
 	i->size	= size;
 	i->ret	= 0;
 
-	while (1) {
+	do {
 		err = flush_buf(i);
 		if (err)
 			return err;
@@ -677,12 +676,9 @@ static ssize_t bch2_journal_pins_read(struct file *file, char __user *buf,
 		if (!i->size)
 			break;
 
-		if (done)
-			break;
-
 		done = bch2_journal_seq_pins_to_text(&i->buf, &c->journal, &i->iter);
 		i->iter++;
-	}
+	} while (!done);
 
 	if (i->buf.allocation_failure)
 		return -ENOMEM;
@@ -697,45 +693,13 @@ static const struct file_operations journal_pins_ops = {
 	.read		= bch2_journal_pins_read,
 };
 
-static ssize_t bch2_btree_updates_read(struct file *file, char __user *buf,
-				       size_t size, loff_t *ppos)
-{
-	struct dump_iter *i = file->private_data;
-	struct bch_fs *c = i->c;
-	int err;
-
-	i->ubuf = buf;
-	i->size	= size;
-	i->ret	= 0;
-
-	if (!i->iter) {
-		bch2_btree_updates_to_text(&i->buf, c);
-		i->iter++;
-	}
-
-	err = flush_buf(i);
-	if (err)
-		return err;
-
-	if (i->buf.allocation_failure)
-		return -ENOMEM;
-
-	return i->ret;
-}
-
-static const struct file_operations btree_updates_ops = {
-	.owner		= THIS_MODULE,
-	.open		= bch2_dump_open,
-	.release	= bch2_dump_release,
-	.read		= bch2_btree_updates_read,
-};
-
 static int btree_transaction_stats_open(struct inode *inode, struct file *file)
 {
 	struct bch_fs *c = inode->i_private;
 	struct dump_iter *i;
 
 	i = kzalloc(sizeof(struct dump_iter), GFP_KERNEL);
+
 	if (!i)
 		return -ENOMEM;
 
@@ -902,20 +866,6 @@ void bch2_fs_debug_exit(struct bch_fs *c)
 		debugfs_remove_recursive(c->fs_debug_dir);
 }
 
-static void bch2_fs_debug_btree_init(struct bch_fs *c, struct btree_debug *bd)
-{
-	struct dentry *d;
-
-	d = debugfs_create_dir(bch2_btree_id_str(bd->id), c->btree_debug_dir);
-
-	debugfs_create_file("keys", 0400, d, bd, &btree_debug_ops);
-
-	debugfs_create_file("formats", 0400, d, bd, &btree_format_debug_ops);
-
-	debugfs_create_file("bfloat-failed", 0400, d, bd,
-			    &bfloat_failed_debug_ops);
-}
-
 void bch2_fs_debug_init(struct bch_fs *c)
 {
 	struct btree_debug *bd;
@@ -938,9 +888,6 @@ void bch2_fs_debug_init(struct bch_fs *c)
 	debugfs_create_file("journal_pins", 0400, c->fs_debug_dir,
 			    c->btree_debug, &journal_pins_ops);
 
-	debugfs_create_file("btree_updates", 0400, c->fs_debug_dir,
-			    c->btree_debug, &btree_updates_ops);
-
 	debugfs_create_file("btree_transaction_stats", 0400, c->fs_debug_dir,
 			    c, &btree_transaction_stats_op);
 
@@ -955,7 +902,21 @@ void bch2_fs_debug_init(struct bch_fs *c)
 	     bd < c->btree_debug + ARRAY_SIZE(c->btree_debug);
 	     bd++) {
 		bd->id = bd - c->btree_debug;
-		bch2_fs_debug_btree_init(c, bd);
+		debugfs_create_file(bch2_btree_id_str(bd->id),
+				    0400, c->btree_debug_dir, bd,
+				    &btree_debug_ops);
+
+		snprintf(name, sizeof(name), "%s-formats",
+			 bch2_btree_id_str(bd->id));
+
+		debugfs_create_file(name, 0400, c->btree_debug_dir, bd,
+				    &btree_format_debug_ops);
+
+		snprintf(name, sizeof(name), "%s-bfloat-failed",
+			 bch2_btree_id_str(bd->id));
+
+		debugfs_create_file(name, 0400, c->btree_debug_dir, bd,
+				    &bfloat_failed_debug_ops);
 	}
 }
 

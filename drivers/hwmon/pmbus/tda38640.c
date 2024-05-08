@@ -15,7 +15,7 @@
 #include "pmbus.h"
 
 static const struct regulator_desc __maybe_unused tda38640_reg_desc[] = {
-	PMBUS_REGULATOR_ONE("vout"),
+	PMBUS_REGULATOR("vout", 0),
 };
 
 struct tda38640_data {

@@ -9,10 +9,18 @@
 #include <linux/percpu.h>
 #include <asm/ibt.h>
 
-#ifndef CONFIG_SMP
+#ifdef CONFIG_SMP
+
+extern void prefill_possible_map(void);
+
+#else /* CONFIG_SMP */
+
+static inline void prefill_possible_map(void) {}
+
 #define cpu_physical_id(cpu)			boot_cpu_physical_apicid
 #define cpu_acpi_id(cpu)			0
 #define safe_smp_processor_id()			0
+
 #endif /* CONFIG_SMP */
 
 #ifdef CONFIG_HOTPLUG_CPU

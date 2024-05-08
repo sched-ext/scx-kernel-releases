@@ -404,7 +404,7 @@ noinstr void hv_nmi_check_nonrecoverable(struct pt_regs *regs)
 		return;
 	if (!(regs->msr & MSR_HV))
 		return;
-	if (user_mode(regs))
+	if (regs->msr & MSR_PR)
 		return;
 
 	/*
@@ -1510,7 +1510,7 @@ static void do_program_check(struct pt_regs *regs)
 		if (!is_kernel_addr(bugaddr) && !(regs->msr & MSR_IR))
 			bugaddr += PAGE_OFFSET;
 
-		if (!user_mode(regs) &&
+		if (!(regs->msr & MSR_PR) &&  /* not user-mode */
 		    report_bug(bugaddr, regs) == BUG_TRAP_TYPE_WARN) {
 			regs_add_return_ip(regs, 4);
 			return;

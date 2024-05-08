@@ -23,7 +23,6 @@
  *
  */
 
-#include "core_types.h"
 #include "dm_services.h"
 #include "dcn10_opp.h"
 #include "reg_helper.h"
@@ -161,9 +160,6 @@ static void opp1_set_pixel_encoding(
 	struct dcn10_opp *oppn10,
 	const struct clamping_and_pixel_encoding_params *params)
 {
-	bool force_chroma_subsampling_1tap =
-			oppn10->base.ctx->dc->debug.force_chroma_subsampling_1tap;
-
 	switch (params->pixel_encoding)	{
 
 	case PIXEL_ENCODING_RGB:
@@ -182,9 +178,6 @@ static void opp1_set_pixel_encoding(
 	default:
 		break;
 	}
-
-	if (force_chroma_subsampling_1tap)
-		REG_UPDATE(FMT_CONTROL,	FMT_SUBSAMPLING_MODE, 0);
 }
 
 /**
@@ -384,7 +377,6 @@ static const struct opp_funcs dcn10_opp_funcs = {
 		.opp_set_disp_pattern_generator = NULL,
 		.opp_program_dpg_dimensions = NULL,
 		.dpg_is_blanked = NULL,
-		.dpg_is_pending = NULL,
 		.opp_destroy = opp1_destroy
 };
 

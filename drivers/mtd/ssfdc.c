@@ -295,7 +295,7 @@ static void ssfdcr_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	if (cis_sector == -1)
 		return;
 
-	ssfdc = kzalloc(sizeof(*ssfdc), GFP_KERNEL);
+	ssfdc = kzalloc(sizeof(struct ssfdcr_record), GFP_KERNEL);
 	if (!ssfdc)
 		return;
 
@@ -332,7 +332,7 @@ static void ssfdcr_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 		kmalloc_array(ssfdc->map_len,
 			      sizeof(ssfdc->logic_block_map[0]), GFP_KERNEL);
 	if (!ssfdc->logic_block_map)
-		goto out_free_ssfdc;
+		goto out_err;
 	memset(ssfdc->logic_block_map, 0xff, sizeof(ssfdc->logic_block_map[0]) *
 		ssfdc->map_len);
 
@@ -350,8 +350,7 @@ static void ssfdcr_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 
 out_err:
 	kfree(ssfdc->logic_block_map);
-out_free_ssfdc:
-	kfree(ssfdc);
+        kfree(ssfdc);
 }
 
 static void ssfdcr_remove_dev(struct mtd_blktrans_dev *dev)

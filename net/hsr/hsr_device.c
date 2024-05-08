@@ -28,19 +28,29 @@ static bool is_slave_up(struct net_device *dev)
 	return dev && is_admin_up(dev) && netif_oper_up(dev);
 }
 
+static void __hsr_set_operstate(struct net_device *dev, int transition)
+{
+	write_lock(&dev_base_lock);
+	if (dev->operstate != transition) {
+		dev->operstate = transition;
+		write_unlock(&dev_base_lock);
+		netdev_state_change(dev);
+	} else {
+		write_unlock(&dev_base_lock);
+	}
+}
+
 static void hsr_set_operstate(struct hsr_port *master, bool has_carrier)
 {
-	struct net_device *dev = master->dev;
-
-	if (!is_admin_up(dev)) {
-		netdev_set_operstate(dev, IF_OPER_DOWN);
+	if (!is_admin_up(master->dev)) {
+		__hsr_set_operstate(master->dev, IF_OPER_DOWN);
 		return;
 	}
 
 	if (has_carrier)
-		netdev_set_operstate(dev, IF_OPER_UP);
+		__hsr_set_operstate(master->dev, IF_OPER_UP);
 	else
-		netdev_set_operstate(dev, IF_OPER_LOWERLAYERDOWN);
+		__hsr_set_operstate(master->dev, IF_OPER_LOWERLAYERDOWN);
 }
 
 static bool hsr_check_carrier(struct hsr_port *master)
@@ -68,14 +78,14 @@ static void hsr_check_announce(struct net_device *hsr_dev,
 
 	hsr = netdev_priv(hsr_dev);
 
-	if (READ_ONCE(hsr_dev->operstate) == IF_OPER_UP && old_operstate != IF_OPER_UP) {
+	if (hsr_dev->operstate == IF_OPER_UP && old_operstate != IF_OPER_UP) {
 		/* Went up */
 		hsr->announce_count = 0;
 		mod_timer(&hsr->announce_timer,
 			  jiffies + msecs_to_jiffies(HSR_ANNOUNCE_INTERVAL));
 	}
 
-	if (READ_ONCE(hsr_dev->operstate) != IF_OPER_UP && old_operstate == IF_OPER_UP)
+	if (hsr_dev->operstate != IF_OPER_UP && old_operstate == IF_OPER_UP)
 		/* Went down */
 		del_timer(&hsr->announce_timer);
 }
@@ -90,7 +100,7 @@ void hsr_check_carrier_and_operstate(struct hsr_priv *hsr)
 	/* netif_stacked_transfer_operstate() cannot be used here since
 	 * it doesn't set IF_OPER_LOWERLAYERDOWN (?)
 	 */
-	old_operstate = READ_ONCE(master->dev->operstate);
+	old_operstate = master->dev->operstate;
 	has_carrier = hsr_check_carrier(master);
 	hsr_set_operstate(master, has_carrier);
 	hsr_check_announce(master->dev, old_operstate);
@@ -132,29 +142,30 @@ static int hsr_dev_open(struct net_device *dev)
 {
 	struct hsr_priv *hsr;
 	struct hsr_port *port;
-	const char *designation = NULL;
+	char designation;
 
 	hsr = netdev_priv(dev);
+	designation = '\0';
 
 	hsr_for_each_port(hsr, port) {
 		if (port->type == HSR_PT_MASTER)
 			continue;
 		switch (port->type) {
 		case HSR_PT_SLAVE_A:
-			designation = "Slave A";
+			designation = 'A';
 			break;
 		case HSR_PT_SLAVE_B:
-			designation = "Slave B";
+			designation = 'B';
 			break;
 		default:
-			designation = "Unknown";
+			designation = '?';
 		}
 		if (!is_slave_up(port->dev))
-			netdev_warn(dev, "%s (%s) is not up; please bring it up to get a fully working HSR network\n",
+			netdev_warn(dev, "Slave %c (%s) is not up; please bring it up to get a fully working HSR network\n",
 				    designation, port->dev->name);
 	}
 
-	if (!designation)
+	if (designation == '\0')
 		netdev_warn(dev, "No slave devices configured\n");
 
 	return 0;
@@ -297,7 +308,7 @@ static void send_hsr_supervision_frame(struct hsr_port *master,
 
 	skb = hsr_init_skb(master);
 	if (!skb) {
-		netdev_warn_once(master->dev, "HSR: Could not send supervision frame\n");
+		WARN_ONCE(1, "HSR: Could not send supervision frame\n");
 		return;
 	}
 
@@ -344,7 +355,7 @@ static void send_prp_supervision_frame(struct hsr_port *master,
 
 	skb = hsr_init_skb(master);
 	if (!skb) {
-		netdev_warn_once(master->dev, "PRP: Could not send supervision frame\n");
+		WARN_ONCE(1, "PRP: Could not send supervision frame\n");
 		return;
 	}
 
@@ -466,7 +477,7 @@ static const struct net_device_ops hsr_device_ops = {
 	.ndo_set_rx_mode = hsr_set_rx_mode,
 };
 
-static const struct device_type hsr_type = {
+static struct device_type hsr_type = {
 	.name = "hsr",
 };
 

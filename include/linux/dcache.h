@@ -125,11 +125,6 @@ enum dentry_d_lock_class
 	DENTRY_D_LOCK_NESTED
 };
 
-enum d_real_type {
-	D_REAL_DATA,
-	D_REAL_METADATA,
-};
-
 struct dentry_operations {
 	int (*d_revalidate)(struct dentry *, unsigned int);
 	int (*d_weak_revalidate)(struct dentry *, unsigned int);
@@ -144,7 +139,7 @@ struct dentry_operations {
 	char *(*d_dname)(struct dentry *, char *, int);
 	struct vfsmount *(*d_automount)(struct path *);
 	int (*d_manage)(const struct path *, bool);
-	struct dentry *(*d_real)(struct dentry *, enum d_real_type type);
+	struct dentry *(*d_real)(struct dentry *, const struct inode *);
 } ____cacheline_aligned;
 
 /*
@@ -178,7 +173,6 @@ struct dentry_operations {
 #define DCACHE_DONTCACHE		BIT(7) /* Purge from memory on final dput() */
 
 #define DCACHE_CANT_MOUNT		BIT(8)
-#define DCACHE_GENOCIDE			BIT(9)
 #define DCACHE_SHRINK_LIST		BIT(10)
 
 #define DCACHE_OP_WEAK_REVALIDATE	BIT(11)
@@ -552,23 +546,24 @@ static inline struct inode *d_backing_inode(const struct dentry *upper)
 /**
  * d_real - Return the real dentry
  * @dentry: the dentry to query
- * @type: the type of real dentry (data or metadata)
+ * @inode: inode to select the dentry from multiple layers (can be NULL)
  *
  * If dentry is on a union/overlay, then return the underlying, real dentry.
  * Otherwise return the dentry itself.
  *
  * See also: Documentation/filesystems/vfs.rst
  */
-static inline struct dentry *d_real(struct dentry *dentry, enum d_real_type type)
+static inline struct dentry *d_real(struct dentry *dentry,
+				    const struct inode *inode)
 {
 	if (unlikely(dentry->d_flags & DCACHE_OP_REAL))
-		return dentry->d_op->d_real(dentry, type);
+		return dentry->d_op->d_real(dentry, inode);
 	else
 		return dentry;
 }
 
 /**
- * d_real_inode - Return the real inode hosting the data
+ * d_real_inode - Return the real inode
  * @dentry: The dentry to query
  *
  * If dentry is on a union/overlay, then return the underlying, real inode.
@@ -577,7 +572,7 @@ static inline struct dentry *d_real(struct dentry *dentry, enum d_real_type type
 static inline struct inode *d_real_inode(const struct dentry *dentry)
 {
 	/* This usage of d_real() results in const dentry */
-	return d_inode(d_real((struct dentry *) dentry, D_REAL_DATA));
+	return d_backing_inode(d_real((struct dentry *) dentry, NULL));
 }
 
 struct name_snapshot {

@@ -326,5 +326,4 @@ static struct platform_driver avs_es8336_driver = {
 
 module_platform_driver(avs_es8336_driver);
 
-MODULE_DESCRIPTION("Intel es8336 machine driver");
 MODULE_LICENSE("GPL");

@@ -67,7 +67,6 @@
 #include <net/sctp/sctp.h>
 #include <net/sctp/sm.h>
 #include <net/sctp/stream_sched.h>
-#include <net/rps.h>
 
 /* Forward declarations for internal helper functions. */
 static bool sctp_writeable(const struct sock *sk);

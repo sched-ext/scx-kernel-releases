@@ -9,15 +9,13 @@
 #define GSP_PAGE_SIZE  BIT(GSP_PAGE_SHIFT)
 
 struct nvkm_gsp_mem {
-	size_t size;
+	u32 size;
 	void *data;
 	dma_addr_t addr;
 };
 
 struct nvkm_gsp_radix3 {
-	struct nvkm_gsp_mem lvl0;
-	struct nvkm_gsp_mem lvl1;
-	struct sg_table lvl2;
+	struct nvkm_gsp_mem mem[3];
 };
 
 int nvkm_gsp_sg(struct nvkm_device *, u64 size, struct sg_table *);

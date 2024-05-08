@@ -1949,7 +1949,8 @@ static void ab8500_charger_check_vbat_work(struct work_struct *work)
 	struct ab8500_charger *di = container_of(work,
 		struct ab8500_charger, check_vbat_work.work);
 
-	power_supply_for_each_device(&di->usb_chg, ab8500_charger_get_ext_psy_data);
+	class_for_each_device(power_supply_class, NULL,
+			      &di->usb_chg, ab8500_charger_get_ext_psy_data);
 
 	/* First run old_vbat is 0. */
 	if (di->old_vbat == 0)

@@ -18,7 +18,6 @@
  * the journal that are being staged or in flight.
  */
 struct journal_buf {
-	struct closure		io;
 	struct jset		*data;
 
 	__BKEY_PADDED(key, BCH_REPLICAS_MAX);
@@ -34,14 +33,10 @@ struct journal_buf {
 	unsigned		disk_sectors;	/* maximum size entry could have been, if
 						   buf_size was bigger */
 	unsigned		u64s_reserved;
-	bool			noflush:1;	/* write has already been kicked off, and was noflush */
-	bool			must_flush:1;	/* something wants a flush */
-	bool			separate_flush:1;
-	bool			need_flush_to_write_buffer:1;
-	bool			write_started:1;
-	bool			write_allocated:1;
-	bool			write_done:1;
-	u8			idx;
+	bool			noflush;	/* write has already been kicked off, and was noflush */
+	bool			must_flush;	/* something wants a flush */
+	bool			separate_flush;
+	bool			need_flush_to_write_buffer;
 };
 
 /*
@@ -134,13 +129,11 @@ enum journal_flags {
 	JOURNAL_STARTED,
 	JOURNAL_MAY_SKIP_FLUSH,
 	JOURNAL_NEED_FLUSH_WRITE,
-	JOURNAL_SPACE_LOW,
 };
 
 /* Reasons we may fail to get a journal reservation: */
 #define JOURNAL_ERRORS()		\
 	x(ok)				\
-	x(retry)			\
 	x(blocked)			\
 	x(max_in_flight)		\
 	x(journal_full)			\
@@ -155,13 +148,6 @@ enum journal_errors {
 };
 
 typedef DARRAY(u64)		darray_u64;
-
-struct journal_bio {
-	struct bch_dev		*ca;
-	unsigned		buf_idx;
-
-	struct bio		bio;
-};
 
 /* Embedded in struct bch_fs */
 struct journal {
@@ -217,8 +203,8 @@ struct journal {
 	wait_queue_head_t	wait;
 	struct closure_waitlist	async_wait;
 
+	struct closure		io;
 	struct delayed_work	write_work;
-	struct workqueue_struct *wq;
 
 	/* Sequence number of most recent journal entry (last entry in @pin) */
 	atomic64_t		seq;
@@ -288,6 +274,11 @@ struct journal {
 	u64			nr_noflush_writes;
 	u64			entry_bytes_written;
 
+	u64			low_on_space_start;
+	u64			low_on_pin_start;
+	u64			max_in_flight_start;
+	u64			write_buffer_full_start;
+
 	struct bch2_time_stats	*flush_write_time;
 	struct bch2_time_stats	*noflush_write_time;
 	struct bch2_time_stats	*flush_seq_time;
@@ -322,7 +313,7 @@ struct journal_device {
 	u64			*buckets;
 
 	/* Bio for journal reads/writes to this device */
-	struct journal_bio	*bio[JOURNAL_BUF_NR];
+	struct bio		*bio;
 
 	/* for bch_journal_read_device */
 	struct closure		read;

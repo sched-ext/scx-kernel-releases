@@ -935,7 +935,6 @@ static inline int vti6_dev_init_gen(struct net_device *dev)
 	if (!dev->tstats)
 		return -ENOMEM;
 	netdev_hold(dev, &t->dev_tracker, GFP_KERNEL);
-	netdev_lockdep_set_classes(dev);
 	return 0;
 }
 
@@ -1175,22 +1174,24 @@ err_alloc_dev:
 	return err;
 }
 
-static void __net_exit vti6_exit_batch_rtnl(struct list_head *net_list,
-					    struct list_head *dev_to_kill)
+static void __net_exit vti6_exit_batch_net(struct list_head *net_list)
 {
 	struct vti6_net *ip6n;
 	struct net *net;
+	LIST_HEAD(list);
 
-	ASSERT_RTNL();
+	rtnl_lock();
 	list_for_each_entry(net, net_list, exit_list) {
 		ip6n = net_generic(net, vti6_net_id);
-		vti6_destroy_tunnels(ip6n, dev_to_kill);
+		vti6_destroy_tunnels(ip6n, &list);
 	}
+	unregister_netdevice_many(&list);
+	rtnl_unlock();
 }
 
 static struct pernet_operations vti6_net_ops = {
 	.init = vti6_init_net,
-	.exit_batch_rtnl = vti6_exit_batch_rtnl,
+	.exit_batch = vti6_exit_batch_net,
 	.id   = &vti6_net_id,
 	.size = sizeof(struct vti6_net),
 };

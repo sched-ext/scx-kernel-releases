@@ -14,6 +14,7 @@
 // Copyright (C) 2020 Dialog Semiconductor
 
 #include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/regulator/machine.h>

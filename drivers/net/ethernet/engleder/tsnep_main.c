@@ -229,10 +229,8 @@ static int tsnep_phy_loopback(struct tsnep_adapter *adapter, bool enable)
 	 * would delay a working loopback anyway, let's ensure that loopback
 	 * is working immediately by setting link mode directly
 	 */
-	if (!retval && enable) {
-		netif_carrier_on(adapter->netdev);
+	if (!retval && enable)
 		tsnep_set_link_mode(adapter);
-	}
 
 	return retval;
 }
@@ -240,7 +238,7 @@ static int tsnep_phy_loopback(struct tsnep_adapter *adapter, bool enable)
 static int tsnep_phy_open(struct tsnep_adapter *adapter)
 {
 	struct phy_device *phydev;
-	struct ethtool_keee ethtool_keee;
+	struct ethtool_eee ethtool_eee;
 	int retval;
 
 	retval = phy_connect_direct(adapter->netdev, adapter->phydev,
@@ -259,8 +257,8 @@ static int tsnep_phy_open(struct tsnep_adapter *adapter)
 	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_1000baseT_Half_BIT);
 
 	/* disable EEE autoneg, EEE not supported by TSNEP */
-	memset(&ethtool_keee, 0, sizeof(ethtool_keee));
-	phy_ethtool_set_eee(adapter->phydev, &ethtool_keee);
+	memset(&ethtool_eee, 0, sizeof(ethtool_eee));
+	phy_ethtool_set_eee(adapter->phydev, &ethtool_eee);
 
 	adapter->phydev->irq = PHY_MAC_INTERRUPT;
 	phy_start(adapter->phydev);
@@ -721,25 +719,17 @@ static void tsnep_xdp_xmit_flush(struct tsnep_tx *tx)
 
 static bool tsnep_xdp_xmit_back(struct tsnep_adapter *adapter,
 				struct xdp_buff *xdp,
-				struct netdev_queue *tx_nq, struct tsnep_tx *tx,
-				bool zc)
+				struct netdev_queue *tx_nq, struct tsnep_tx *tx)
 {
 	struct xdp_frame *xdpf = xdp_convert_buff_to_frame(xdp);
 	bool xmit;
-	u32 type;
 
 	if (unlikely(!xdpf))
 		return false;
 
-	/* no page pool for zero copy */
-	if (zc)
-		type = TSNEP_TX_TYPE_XDP_NDO;
-	else
-		type = TSNEP_TX_TYPE_XDP_TX;
-
 	__netif_tx_lock(tx_nq, smp_processor_id());
 
-	xmit = tsnep_xdp_xmit_frame_ring(xdpf, tx, type);
+	xmit = tsnep_xdp_xmit_frame_ring(xdpf, tx, TSNEP_TX_TYPE_XDP_TX);
 
 	/* Avoid transmit queue timeout since we share it with the slow path */
 	if (xmit)
@@ -1268,14 +1258,6 @@ static int tsnep_rx_refill_zc(struct tsnep_rx *rx, int count, bool reuse)
 	return desc_refilled;
 }
 
-static void tsnep_xsk_rx_need_wakeup(struct tsnep_rx *rx, int desc_available)
-{
-	if (desc_available)
-		xsk_set_rx_need_wakeup(rx->xsk_pool);
-	else
-		xsk_clear_rx_need_wakeup(rx->xsk_pool);
-}
-
 static bool tsnep_xdp_run_prog(struct tsnep_rx *rx, struct bpf_prog *prog,
 			       struct xdp_buff *xdp, int *status,
 			       struct netdev_queue *tx_nq, struct tsnep_tx *tx)
@@ -1291,7 +1273,7 @@ static bool tsnep_xdp_run_prog(struct tsnep_rx *rx, struct bpf_prog *prog,
 	case XDP_PASS:
 		return false;
 	case XDP_TX:
-		if (!tsnep_xdp_xmit_back(rx->adapter, xdp, tx_nq, tx, false))
+		if (!tsnep_xdp_xmit_back(rx->adapter, xdp, tx_nq, tx))
 			goto out_failure;
 		*status |= TSNEP_XDP_TX;
 		return true;
@@ -1341,7 +1323,7 @@ static bool tsnep_xdp_run_prog_zc(struct tsnep_rx *rx, struct bpf_prog *prog,
 	case XDP_PASS:
 		return false;
 	case XDP_TX:
-		if (!tsnep_xdp_xmit_back(rx->adapter, xdp, tx_nq, tx, true))
+		if (!tsnep_xdp_xmit_back(rx->adapter, xdp, tx_nq, tx))
 			goto out_failure;
 		*status |= TSNEP_XDP_TX;
 		return true;
@@ -1637,7 +1619,10 @@ static int tsnep_rx_poll_zc(struct tsnep_rx *rx, struct napi_struct *napi,
 		desc_available -= tsnep_rx_refill_zc(rx, desc_available, false);
 
 	if (xsk_uses_need_wakeup(rx->xsk_pool)) {
-		tsnep_xsk_rx_need_wakeup(rx, desc_available);
+		if (desc_available)
+			xsk_set_rx_need_wakeup(rx->xsk_pool);
+		else
+			xsk_clear_rx_need_wakeup(rx->xsk_pool);
 
 		return done;
 	}
@@ -1782,8 +1767,14 @@ static void tsnep_rx_reopen_xsk(struct tsnep_rx *rx)
 	 * first polling would be too late as need wakeup signalisation would
 	 * be delayed for an indefinite time
 	 */
-	if (xsk_uses_need_wakeup(rx->xsk_pool))
-		tsnep_xsk_rx_need_wakeup(rx, tsnep_rx_desc_available(rx));
+	if (xsk_uses_need_wakeup(rx->xsk_pool)) {
+		int desc_available = tsnep_rx_desc_available(rx);
+
+		if (desc_available)
+			xsk_set_rx_need_wakeup(rx->xsk_pool);
+		else
+			xsk_clear_rx_need_wakeup(rx->xsk_pool);
+	}
 }
 
 static bool tsnep_pending(struct tsnep_queue *queue)
@@ -2571,7 +2562,8 @@ static int tsnep_probe(struct platform_device *pdev)
 	mutex_init(&adapter->rxnfc_lock);
 	INIT_LIST_HEAD(&adapter->rxnfc_rules);
 
-	adapter->addr = devm_platform_get_and_ioremap_resource(pdev, 0, &io);
+	io = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	adapter->addr = devm_ioremap_resource(&pdev->dev, io);
 	if (IS_ERR(adapter->addr))
 		return PTR_ERR(adapter->addr);
 	netdev->mem_start = io->start;

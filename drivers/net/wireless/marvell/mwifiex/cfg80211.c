@@ -3359,7 +3359,7 @@ static int mwifiex_set_wowlan_mef_entry(struct mwifiex_private *priv,
 		}
 
 		if (!wowlan->patterns[i].pkt_offset) {
-			if (is_unicast_ether_addr(byte_seq) &&
+			if (!(byte_seq[0] & 0x01) &&
 			    (byte_seq[MWIFIEX_MEF_MAX_BYTESEQ] == 1)) {
 				mef_cfg->criteria |= MWIFIEX_CRITERIA_UNICAST;
 				continue;

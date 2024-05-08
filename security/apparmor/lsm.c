@@ -779,12 +779,12 @@ static int apparmor_sb_pivotroot(const struct path *old_path,
 }
 
 static int apparmor_getselfattr(unsigned int attr, struct lsm_ctx __user *lx,
-				u32 *size, u32 flags)
+				size_t *size, u32 flags)
 {
 	int error = -ENOENT;
 	struct aa_task_ctx *ctx = task_ctx(current);
 	struct aa_label *label = NULL;
-	char *value = NULL;
+	char *value;
 
 	switch (attr) {
 	case LSM_ATTR_CURRENT:
@@ -924,7 +924,7 @@ fail:
 }
 
 static int apparmor_setselfattr(unsigned int attr, struct lsm_ctx *ctx,
-				u32 size, u32 flags)
+				size_t size, u32 flags)
 {
 	int rc;
 

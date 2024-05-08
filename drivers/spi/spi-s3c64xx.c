@@ -3,22 +3,19 @@
 // Copyright (c) 2009 Samsung Electronics Co., Ltd.
 //      Jaswinder Singh <jassi.brar@samsung.com>
 
-#include <linux/bitops.h>
-#include <linux/bits.h>
-#include <linux/clk.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/clk.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
-#include <linux/init.h>
-#include <linux/interrupt.h>
-#include <linux/io.h>
-#include <linux/module.h>
-#include <linux/of.h>
-#include <linux/platform_data/spi-s3c64xx.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/spi/spi.h>
-#include <linux/types.h>
+#include <linux/of.h>
+
+#include <linux/platform_data/spi-s3c64xx.h>
 
 #define MAX_SPI_PORTS		12
 #define S3C64XX_SPI_QUIRK_CS_AUTO	(1 << 1)
@@ -79,9 +76,6 @@
 #define S3C64XX_SPI_INT_RX_FIFORDY_EN		(1<<1)
 #define S3C64XX_SPI_INT_TX_FIFORDY_EN		(1<<0)
 
-#define S3C64XX_SPI_ST_RX_FIFO_RDY_V2		GENMASK(23, 15)
-#define S3C64XX_SPI_ST_TX_FIFO_RDY_V2		GENMASK(14, 6)
-#define S3C64XX_SPI_ST_TX_FIFO_LVL_SHIFT	6
 #define S3C64XX_SPI_ST_RX_OVERRUN_ERR		(1<<5)
 #define S3C64XX_SPI_ST_RX_UNDERRUN_ERR		(1<<4)
 #define S3C64XX_SPI_ST_TX_OVERRUN_ERR		(1<<3)
@@ -112,14 +106,14 @@
 #define FIFO_LVL_MASK(i) ((i)->port_conf->fifo_lvl_mask[i->port_id])
 #define S3C64XX_SPI_ST_TX_DONE(v, i) (((v) & \
 				(1 << (i)->port_conf->tx_st_done)) ? 1 : 0)
-#define TX_FIFO_LVL(v, sdd)	(((v) & (sdd)->tx_fifomask) >>		\
-				 __ffs((sdd)->tx_fifomask))
-#define RX_FIFO_LVL(v, sdd)	(((v) & (sdd)->rx_fifomask) >>		\
-				 __ffs((sdd)->rx_fifomask))
-#define FIFO_DEPTH(i) ((FIFO_LVL_MASK(i) >> 1) + 1)
+#define TX_FIFO_LVL(v, i) (((v) >> 6) & FIFO_LVL_MASK(i))
+#define RX_FIFO_LVL(v, i) (((v) >> (i)->port_conf->rx_lvl_offset) & \
+					FIFO_LVL_MASK(i))
 
 #define S3C64XX_SPI_MAX_TRAILCNT	0x3ff
 #define S3C64XX_SPI_TRAILCNT_OFF	19
+
+#define S3C64XX_SPI_TRAILCNT		S3C64XX_SPI_MAX_TRAILCNT
 
 #define S3C64XX_SPI_POLLING_SIZE	32
 
@@ -137,13 +131,8 @@ struct s3c64xx_spi_dma_data {
 
 /**
  * struct s3c64xx_spi_port_config - SPI Controller hardware info
- * @fifo_lvl_mask: [DEPRECATED] use @{rx, tx}_fifomask instead.
- * @rx_lvl_offset: [DEPRECATED] use @{rx,tx}_fifomask instead.
- * @fifo_depth: depth of the FIFO.
- * @rx_fifomask: SPI_STATUS.RX_FIFO_LVL mask. Shifted mask defining the field's
- *               length and position.
- * @tx_fifomask: SPI_STATUS.TX_FIFO_LVL mask. Shifted mask defining the field's
- *               length and position.
+ * @fifo_lvl_mask: Bit-mask for {TX|RX}_FIFO_LVL bits in SPI_STATUS register.
+ * @rx_lvl_offset: Bit offset of RX_FIFO_LVL bits in SPI_STATUS regiter.
  * @tx_st_done: Bit offset of TX_DONE bit in SPI_STATUS regiter.
  * @clk_div: Internal clock divider
  * @quirks: Bitmask of known quirks
@@ -152,7 +141,6 @@ struct s3c64xx_spi_dma_data {
  *	prescaler unit.
  * @clk_ioclk: True if clock is present on this device
  * @has_loopback: True if loopback mode can be supported
- * @use_32bit_io: True if the SoC allows only 32-bit register accesses.
  *
  * The Samsung s3c64xx SPI controller are used on various Samsung SoC's but
  * differ in some aspects such as the size of the fifo and spi bus clock
@@ -162,9 +150,6 @@ struct s3c64xx_spi_dma_data {
 struct s3c64xx_spi_port_config {
 	int	fifo_lvl_mask[MAX_SPI_PORTS];
 	int	rx_lvl_offset;
-	unsigned int fifo_depth;
-	u32	rx_fifomask;
-	u32	tx_fifomask;
 	int	tx_st_done;
 	int	quirks;
 	int	clk_div;
@@ -172,7 +157,6 @@ struct s3c64xx_spi_port_config {
 	bool	clk_from_cmu;
 	bool	clk_ioclk;
 	bool	has_loopback;
-	bool	use_32bit_io;
 };
 
 /**
@@ -193,13 +177,8 @@ struct s3c64xx_spi_port_config {
  * @cur_speed: Current clock speed
  * @rx_dma: Local receive DMA data (e.g. chan and direction)
  * @tx_dma: Local transmit DMA data (e.g. chan and direction)
- * @port_conf: Local SPI port configuration data
- * @port_id: [DEPRECATED] use @{rx,tx}_fifomask instead.
- * @fifo_depth: depth of the FIFO.
- * @rx_fifomask: SPI_STATUS.RX_FIFO_LVL mask. Shifted mask defining the field's
- *               length and position.
- * @tx_fifomask: SPI_STATUS.TX_FIFO_LVL mask. Shifted mask defining the field's
- *               length and position.
+ * @port_conf: Local SPI port configuartion data
+ * @port_id: Port identification number
  */
 struct s3c64xx_spi_driver_data {
 	void __iomem                    *regs;
@@ -219,9 +198,6 @@ struct s3c64xx_spi_driver_data {
 	struct s3c64xx_spi_dma_data	tx_dma;
 	const struct s3c64xx_spi_port_config	*port_conf;
 	unsigned int			port_id;
-	unsigned int			fifo_depth;
-	u32				rx_fifomask;
-	u32				tx_fifomask;
 };
 
 static void s3c64xx_flush_fifo(struct s3c64xx_spi_driver_data *sdd)
@@ -300,8 +276,8 @@ static void s3c64xx_spi_dmacb(void *data)
 	spin_unlock_irqrestore(&sdd->lock, flags);
 }
 
-static int s3c64xx_prepare_dma(struct s3c64xx_spi_dma_data *dma,
-			       struct sg_table *sgt)
+static int prepare_dma(struct s3c64xx_spi_dma_data *dma,
+			struct sg_table *sgt)
 {
 	struct s3c64xx_spi_driver_data *sdd;
 	struct dma_slave_config config;
@@ -313,20 +289,20 @@ static int s3c64xx_prepare_dma(struct s3c64xx_spi_dma_data *dma,
 	if (dma->direction == DMA_DEV_TO_MEM) {
 		sdd = container_of((void *)dma,
 			struct s3c64xx_spi_driver_data, rx_dma);
+		config.direction = dma->direction;
 		config.src_addr = sdd->sfr_start + S3C64XX_SPI_RX_DATA;
 		config.src_addr_width = sdd->cur_bpw / 8;
 		config.src_maxburst = 1;
+		dmaengine_slave_config(dma->ch, &config);
 	} else {
 		sdd = container_of((void *)dma,
 			struct s3c64xx_spi_driver_data, tx_dma);
+		config.direction = dma->direction;
 		config.dst_addr = sdd->sfr_start + S3C64XX_SPI_TX_DATA;
 		config.dst_addr_width = sdd->cur_bpw / 8;
 		config.dst_maxburst = 1;
+		dmaengine_slave_config(dma->ch, &config);
 	}
-	config.direction = dma->direction;
-	ret = dmaengine_slave_config(dma->ch, &config);
-	if (ret)
-		return ret;
 
 	desc = dmaengine_prep_slave_sg(dma->ch, sgt->sgl, sgt->nents,
 				       dma->direction, DMA_PREP_INTERRUPT);
@@ -343,7 +319,7 @@ static int s3c64xx_prepare_dma(struct s3c64xx_spi_dma_data *dma,
 	ret = dma_submit_error(dma->cookie);
 	if (ret) {
 		dev_err(&sdd->pdev->dev, "DMA submission failed");
-		return ret;
+		return -EIO;
 	}
 
 	dma_async_issue_pending(dma->ch);
@@ -429,60 +405,12 @@ static bool s3c64xx_spi_can_dma(struct spi_controller *host,
 {
 	struct s3c64xx_spi_driver_data *sdd = spi_controller_get_devdata(host);
 
-	if (sdd->rx_dma.ch && sdd->tx_dma.ch)
-		return xfer->len >= sdd->fifo_depth;
-
-	return false;
-}
-
-static void s3c64xx_iowrite8_32_rep(volatile void __iomem *addr,
-				    const void *buffer, unsigned int count)
-{
-	if (count) {
-		const u8 *buf = buffer;
-
-		do {
-			__raw_writel(*buf++, addr);
-		} while (--count);
+	if (sdd->rx_dma.ch && sdd->tx_dma.ch) {
+		return xfer->len > (FIFO_LVL_MASK(sdd) >> 1) + 1;
+	} else {
+		return false;
 	}
-}
 
-static void s3c64xx_iowrite16_32_rep(volatile void __iomem *addr,
-				     const void *buffer, unsigned int count)
-{
-	if (count) {
-		const u16 *buf = buffer;
-
-		do {
-			__raw_writel(*buf++, addr);
-		} while (--count);
-	}
-}
-
-static void s3c64xx_iowrite_rep(const struct s3c64xx_spi_driver_data *sdd,
-				struct spi_transfer *xfer)
-{
-	void __iomem *addr = sdd->regs + S3C64XX_SPI_TX_DATA;
-	const void *buf = xfer->tx_buf;
-	unsigned int len = xfer->len;
-
-	switch (sdd->cur_bpw) {
-	case 32:
-		iowrite32_rep(addr, buf, len / 4);
-		break;
-	case 16:
-		if (sdd->port_conf->use_32bit_io)
-			s3c64xx_iowrite16_32_rep(addr, buf, len / 2);
-		else
-			iowrite16_rep(addr, buf, len / 2);
-		break;
-	default:
-		if (sdd->port_conf->use_32bit_io)
-			s3c64xx_iowrite8_32_rep(addr, buf, len);
-		else
-			iowrite8_rep(addr, buf, len);
-		break;
-	}
 }
 
 static int s3c64xx_enable_datapath(struct s3c64xx_spi_driver_data *sdd,
@@ -516,9 +444,22 @@ static int s3c64xx_enable_datapath(struct s3c64xx_spi_driver_data *sdd,
 		chcfg |= S3C64XX_SPI_CH_TXCH_ON;
 		if (dma_mode) {
 			modecfg |= S3C64XX_SPI_MODE_TXDMA_ON;
-			ret = s3c64xx_prepare_dma(&sdd->tx_dma, &xfer->tx_sg);
+			ret = prepare_dma(&sdd->tx_dma, &xfer->tx_sg);
 		} else {
-			s3c64xx_iowrite_rep(sdd, xfer);
+			switch (sdd->cur_bpw) {
+			case 32:
+				iowrite32_rep(regs + S3C64XX_SPI_TX_DATA,
+					xfer->tx_buf, xfer->len / 4);
+				break;
+			case 16:
+				iowrite16_rep(regs + S3C64XX_SPI_TX_DATA,
+					xfer->tx_buf, xfer->len / 2);
+				break;
+			default:
+				iowrite8_rep(regs + S3C64XX_SPI_TX_DATA,
+					xfer->tx_buf, xfer->len);
+				break;
+			}
 		}
 	}
 
@@ -535,7 +476,7 @@ static int s3c64xx_enable_datapath(struct s3c64xx_spi_driver_data *sdd,
 			writel(((xfer->len * 8 / sdd->cur_bpw) & 0xffff)
 					| S3C64XX_SPI_PACKET_CNT_EN,
 					regs + S3C64XX_SPI_PACKET_CNT);
-			ret = s3c64xx_prepare_dma(&sdd->rx_dma, &xfer->rx_sg);
+			ret = prepare_dma(&sdd->rx_dma, &xfer->rx_sg);
 		}
 	}
 
@@ -554,7 +495,9 @@ static u32 s3c64xx_spi_wait_for_timeout(struct s3c64xx_spi_driver_data *sdd,
 	void __iomem *regs = sdd->regs;
 	unsigned long val = 1;
 	u32 status;
-	u32 max_fifo = sdd->fifo_depth;
+
+	/* max fifo depth available */
+	u32 max_fifo = (FIFO_LVL_MASK(sdd) >> 1) + 1;
 
 	if (timeout_ms)
 		val = msecs_to_loops(timeout_ms);
@@ -585,7 +528,7 @@ static int s3c64xx_wait_for_dma(struct s3c64xx_spi_driver_data *sdd,
 
 	/*
 	 * If the previous xfer was completed within timeout, then
-	 * proceed further else return -ETIMEDOUT.
+	 * proceed further else return -EIO.
 	 * DmaTx returns after simply writing data in the FIFO,
 	 * w/o waiting for real transmission on the bus to finish.
 	 * DmaRx returns only after Dma read data from FIFO which
@@ -606,7 +549,7 @@ static int s3c64xx_wait_for_dma(struct s3c64xx_spi_driver_data *sdd,
 
 	/* If timed out while checking rx/tx status return error */
 	if (!val)
-		return -ETIMEDOUT;
+		return -EIO;
 
 	return 0;
 }
@@ -636,7 +579,7 @@ static int s3c64xx_wait_for_pio(struct s3c64xx_spi_driver_data *sdd,
 	if (use_irq) {
 		val = msecs_to_jiffies(ms);
 		if (!wait_for_completion_timeout(&sdd->xfer_completion, val))
-			return -ETIMEDOUT;
+			return -EIO;
 	}
 
 	val = msecs_to_loops(ms);
@@ -661,7 +604,7 @@ static int s3c64xx_wait_for_pio(struct s3c64xx_spi_driver_data *sdd,
 	 * For any size less than the fifo size the below code is
 	 * executed atleast once.
 	 */
-	loops = xfer->len / sdd->fifo_depth;
+	loops = xfer->len / ((FIFO_LVL_MASK(sdd) >> 1) + 1);
 	buf = xfer->rx_buf;
 	do {
 		/* wait for data to be received in the fifo */
@@ -798,7 +741,7 @@ static int s3c64xx_spi_transfer_one(struct spi_controller *host,
 				    struct spi_transfer *xfer)
 {
 	struct s3c64xx_spi_driver_data *sdd = spi_controller_get_devdata(host);
-	const unsigned int fifo_len = sdd->fifo_depth;
+	const unsigned int fifo_len = (FIFO_LVL_MASK(sdd) >> 1) + 1;
 	const void *tx_buf = NULL;
 	void *rx_buf = NULL;
 	int target_len = 0, origin_len = 0;
@@ -826,9 +769,10 @@ static int s3c64xx_spi_transfer_one(struct spi_controller *host,
 			return status;
 	}
 
-	if (!is_polling(sdd) && xfer->len >= fifo_len &&
+	if (!is_polling(sdd) && (xfer->len > fifo_len) &&
 	    sdd->rx_dma.ch && sdd->tx_dma.ch) {
 		use_dma = 1;
+
 	} else if (xfer->len >= fifo_len) {
 		tx_buf = xfer->tx_buf;
 		rx_buf = xfer->rx_buf;
@@ -1149,7 +1093,8 @@ static void s3c64xx_spi_hwinit(struct s3c64xx_spi_driver_data *sdd)
 
 	val = readl(regs + S3C64XX_SPI_MODE_CFG);
 	val &= ~S3C64XX_SPI_MODE_4BURST;
-	val |= (S3C64XX_SPI_MAX_TRAILCNT << S3C64XX_SPI_TRAILCNT_OFF);
+	val &= ~(S3C64XX_SPI_MAX_TRAILCNT << S3C64XX_SPI_TRAILCNT_OFF);
+	val |= (S3C64XX_SPI_TRAILCNT << S3C64XX_SPI_TRAILCNT_OFF);
 	writel(val, regs + S3C64XX_SPI_MODE_CFG);
 
 	s3c64xx_flush_fifo(sdd);
@@ -1166,14 +1111,14 @@ static struct s3c64xx_spi_info *s3c64xx_spi_parse_dt(struct device *dev)
 		return ERR_PTR(-ENOMEM);
 
 	if (of_property_read_u32(dev->of_node, "samsung,spi-src-clk", &temp)) {
-		dev_dbg(dev, "spi bus clock parent not specified, using clock at index 0 as parent\n");
+		dev_warn(dev, "spi bus clock parent not specified, using clock at index 0 as parent\n");
 		sci->src_clk_nr = 0;
 	} else {
 		sci->src_clk_nr = temp;
 	}
 
 	if (of_property_read_u32(dev->of_node, "num-cs", &temp)) {
-		dev_dbg(dev, "number of chip select lines not specified, assuming 1 chip select line\n");
+		dev_warn(dev, "number of chip select lines not specified, assuming 1 chip select line\n");
 		sci->num_cs = 1;
 	} else {
 		sci->num_cs = temp;
@@ -1199,48 +1144,6 @@ static inline const struct s3c64xx_spi_port_config *s3c64xx_spi_get_port_config(
 		return of_device_get_match_data(&pdev->dev);
 #endif
 	return (const struct s3c64xx_spi_port_config *)platform_get_device_id(pdev)->driver_data;
-}
-
-static int s3c64xx_spi_set_port_id(struct platform_device *pdev,
-				   struct s3c64xx_spi_driver_data *sdd)
-{
-	const struct s3c64xx_spi_port_config *port_conf = sdd->port_conf;
-	int ret;
-
-	if (port_conf->rx_fifomask && port_conf->tx_fifomask)
-		return 0;
-
-	if (pdev->dev.of_node) {
-		ret = of_alias_get_id(pdev->dev.of_node, "spi");
-		if (ret < 0)
-			return dev_err_probe(&pdev->dev, ret,
-					     "Failed to get alias id\n");
-		sdd->port_id = ret;
-	} else {
-		if (pdev->id < 0)
-			return dev_err_probe(&pdev->dev, -EINVAL,
-					     "Negative platform ID is not allowed\n");
-		sdd->port_id = pdev->id;
-	}
-
-	return 0;
-}
-
-static void s3c64xx_spi_set_fifomask(struct s3c64xx_spi_driver_data *sdd)
-{
-	const struct s3c64xx_spi_port_config *port_conf = sdd->port_conf;
-
-	if (port_conf->rx_fifomask)
-		sdd->rx_fifomask = port_conf->rx_fifomask;
-	else
-		sdd->rx_fifomask = FIFO_LVL_MASK(sdd) <<
-			port_conf->rx_lvl_offset;
-
-	if (port_conf->tx_fifomask)
-		sdd->tx_fifomask = port_conf->tx_fifomask;
-	else
-		sdd->tx_fifomask = FIFO_LVL_MASK(sdd) <<
-			S3C64XX_SPI_ST_TX_FIFO_LVL_SHIFT;
 }
 
 static int s3c64xx_spi_probe(struct platform_device *pdev)
@@ -1278,18 +1181,15 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 	sdd->host = host;
 	sdd->cntrlr_info = sci;
 	sdd->pdev = pdev;
-
-	ret = s3c64xx_spi_set_port_id(pdev, sdd);
-	if (ret)
-		return ret;
-
-	if (sdd->port_conf->fifo_depth)
-		sdd->fifo_depth = sdd->port_conf->fifo_depth;
-	else if (of_property_read_u32(pdev->dev.of_node, "fifo-depth",
-				      &sdd->fifo_depth))
-		sdd->fifo_depth = FIFO_DEPTH(sdd);
-
-	s3c64xx_spi_set_fifomask(sdd);
+	if (pdev->dev.of_node) {
+		ret = of_alias_get_id(pdev->dev.of_node, "spi");
+		if (ret < 0)
+			return dev_err_probe(&pdev->dev, ret,
+					     "Failed to get alias id\n");
+		sdd->port_id = ret;
+	} else {
+		sdd->port_id = pdev->id;
+	}
 
 	sdd->cur_bpw = 8;
 
@@ -1297,7 +1197,7 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 	sdd->rx_dma.direction = DMA_DEV_TO_MEM;
 
 	host->dev.of_node = pdev->dev.of_node;
-	host->bus_num = -1;
+	host->bus_num = sdd->port_id;
 	host->setup = s3c64xx_spi_setup;
 	host->cleanup = s3c64xx_spi_cleanup;
 	host->prepare_transfer_hardware = s3c64xx_spi_prepare_transfer;
@@ -1378,9 +1278,9 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 	}
 
 	dev_dbg(&pdev->dev, "Samsung SoC SPI Driver loaded for Bus SPI-%d with %d Targets attached\n",
-		host->bus_num, host->num_chipselect);
+					sdd->port_id, host->num_chipselect);
 	dev_dbg(&pdev->dev, "\tIOmem=[%pR]\tFIFO %dbytes\n",
-		mem_res, sdd->fifo_depth);
+					mem_res, (FIFO_LVL_MASK(sdd) >> 1) + 1);
 
 	pm_runtime_mark_last_busy(&pdev->dev);
 	pm_runtime_put_autosuspend(&pdev->dev);
@@ -1419,9 +1319,8 @@ static int s3c64xx_spi_suspend(struct device *dev)
 {
 	struct spi_controller *host = dev_get_drvdata(dev);
 	struct s3c64xx_spi_driver_data *sdd = spi_controller_get_devdata(host);
-	int ret;
 
-	ret = spi_controller_suspend(host);
+	int ret = spi_controller_suspend(host);
 	if (ret)
 		return ret;
 
@@ -1509,9 +1408,7 @@ static const struct dev_pm_ops s3c64xx_spi_pm = {
 };
 
 static const struct s3c64xx_spi_port_config s3c2443_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x7f },
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 13,
 	.tx_st_done	= 21,
 	.clk_div	= 2,
@@ -1519,18 +1416,14 @@ static const struct s3c64xx_spi_port_config s3c2443_spi_port_config = {
 };
 
 static const struct s3c64xx_spi_port_config s3c6410_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x7f, 0x7F },
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 13,
 	.tx_st_done	= 21,
 	.clk_div	= 2,
 };
 
 static const struct s3c64xx_spi_port_config s5pv210_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x1ff, 0x7F },
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 15,
 	.tx_st_done	= 25,
 	.clk_div	= 2,
@@ -1538,9 +1431,7 @@ static const struct s3c64xx_spi_port_config s5pv210_spi_port_config = {
 };
 
 static const struct s3c64xx_spi_port_config exynos4_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x1ff, 0x7F, 0x7F },
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 15,
 	.tx_st_done	= 25,
 	.clk_div	= 2,
@@ -1550,9 +1441,7 @@ static const struct s3c64xx_spi_port_config exynos4_spi_port_config = {
 };
 
 static const struct s3c64xx_spi_port_config exynos7_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x1ff, 0x7F, 0x7F, 0x7F, 0x7F, 0x1ff},
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 15,
 	.tx_st_done	= 25,
 	.clk_div	= 2,
@@ -1562,9 +1451,7 @@ static const struct s3c64xx_spi_port_config exynos7_spi_port_config = {
 };
 
 static const struct s3c64xx_spi_port_config exynos5433_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x1ff, 0x7f, 0x7f, 0x7f, 0x7f, 0x1ff},
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 15,
 	.tx_st_done	= 25,
 	.clk_div	= 2,
@@ -1574,23 +1461,9 @@ static const struct s3c64xx_spi_port_config exynos5433_spi_port_config = {
 	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
 };
 
-static const struct s3c64xx_spi_port_config exynos850_spi_port_config = {
-	.fifo_depth	= 64,
-	.rx_fifomask	= S3C64XX_SPI_ST_RX_FIFO_RDY_V2,
-	.tx_fifomask	= S3C64XX_SPI_ST_TX_FIFO_RDY_V2,
-	.tx_st_done	= 25,
-	.clk_div	= 4,
-	.high_speed	= true,
-	.clk_from_cmu	= true,
-	.has_loopback	= true,
-	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
-};
-
 static const struct s3c64xx_spi_port_config exynosautov9_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x1ff, 0x1ff, 0x7f, 0x7f, 0x7f, 0x7f, 0x1ff, 0x7f,
 			    0x7f, 0x7f, 0x7f, 0x7f},
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 15,
 	.tx_st_done	= 25,
 	.clk_div	= 4,
@@ -1602,28 +1475,13 @@ static const struct s3c64xx_spi_port_config exynosautov9_spi_port_config = {
 };
 
 static const struct s3c64xx_spi_port_config fsd_spi_port_config = {
-	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
 	.fifo_lvl_mask	= { 0x7f, 0x7f, 0x7f, 0x7f, 0x7f},
-	/* rx_lvl_offset is deprecated. Use {rx, tx}_fifomask instead. */
 	.rx_lvl_offset	= 15,
 	.tx_st_done	= 25,
 	.clk_div	= 2,
 	.high_speed	= true,
 	.clk_from_cmu	= true,
 	.clk_ioclk	= false,
-	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
-};
-
-static const struct s3c64xx_spi_port_config gs101_spi_port_config = {
-	.fifo_depth	= 64,
-	.rx_fifomask	= S3C64XX_SPI_ST_RX_FIFO_RDY_V2,
-	.tx_fifomask	= S3C64XX_SPI_ST_TX_FIFO_RDY_V2,
-	.tx_st_done	= 25,
-	.clk_div	= 4,
-	.high_speed	= true,
-	.clk_from_cmu	= true,
-	.has_loopback	= true,
-	.use_32bit_io	= true,
 	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
 };
 
@@ -1639,35 +1497,29 @@ static const struct platform_device_id s3c64xx_spi_driver_ids[] = {
 };
 
 static const struct of_device_id s3c64xx_spi_dt_match[] = {
-	{ .compatible = "google,gs101-spi",
-			.data = &gs101_spi_port_config,
-	},
 	{ .compatible = "samsung,s3c2443-spi",
-			.data = &s3c2443_spi_port_config,
+			.data = (void *)&s3c2443_spi_port_config,
 	},
 	{ .compatible = "samsung,s3c6410-spi",
-			.data = &s3c6410_spi_port_config,
+			.data = (void *)&s3c6410_spi_port_config,
 	},
 	{ .compatible = "samsung,s5pv210-spi",
-			.data = &s5pv210_spi_port_config,
+			.data = (void *)&s5pv210_spi_port_config,
 	},
 	{ .compatible = "samsung,exynos4210-spi",
-			.data = &exynos4_spi_port_config,
+			.data = (void *)&exynos4_spi_port_config,
 	},
 	{ .compatible = "samsung,exynos7-spi",
-			.data = &exynos7_spi_port_config,
+			.data = (void *)&exynos7_spi_port_config,
 	},
 	{ .compatible = "samsung,exynos5433-spi",
-			.data = &exynos5433_spi_port_config,
-	},
-	{ .compatible = "samsung,exynos850-spi",
-			.data = &exynos850_spi_port_config,
+			.data = (void *)&exynos5433_spi_port_config,
 	},
 	{ .compatible = "samsung,exynosautov9-spi",
-			.data = &exynosautov9_spi_port_config,
+			.data = (void *)&exynosautov9_spi_port_config,
 	},
 	{ .compatible = "tesla,fsd-spi",
-			.data = &fsd_spi_port_config,
+			.data = (void *)&fsd_spi_port_config,
 	},
 	{ },
 };

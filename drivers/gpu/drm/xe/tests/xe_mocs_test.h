@@ -9,6 +9,5 @@
 struct kunit;
 
 void xe_live_mocs_kernel_kunit(struct kunit *test);
-void xe_live_mocs_reset_kunit(struct kunit *test);
 
 #endif

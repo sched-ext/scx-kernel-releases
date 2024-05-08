@@ -114,7 +114,7 @@ static int mmap_violation_check(enum ima_hooks func, struct file *file,
  *
  */
 static void ima_rdwr_violation_check(struct file *file,
-				     struct ima_iint_cache *iint,
+				     struct integrity_iint_cache *iint,
 				     int must_measure,
 				     char **pathbuf,
 				     const char **pathname,
@@ -127,7 +127,7 @@ static void ima_rdwr_violation_check(struct file *file,
 	if (mode & FMODE_WRITE) {
 		if (atomic_read(&inode->i_readcount) && IS_IMA(inode)) {
 			if (!iint)
-				iint = ima_iint_find(inode);
+				iint = integrity_iint_find(inode);
 			/* IMA_MEASURE is set from reader side */
 			if (iint && test_bit(IMA_MUST_MEASURE,
 						&iint->atomic_flags))
@@ -153,7 +153,7 @@ static void ima_rdwr_violation_check(struct file *file,
 				  "invalid_pcr", "open_writers");
 }
 
-static void ima_check_last_writer(struct ima_iint_cache *iint,
+static void ima_check_last_writer(struct integrity_iint_cache *iint,
 				  struct inode *inode, struct file *file)
 {
 	fmode_t mode = file->f_mode;
@@ -189,15 +189,15 @@ static void ima_check_last_writer(struct ima_iint_cache *iint,
  *
  * Flag files that changed, based on i_version
  */
-static void ima_file_free(struct file *file)
+void ima_file_free(struct file *file)
 {
 	struct inode *inode = file_inode(file);
-	struct ima_iint_cache *iint;
+	struct integrity_iint_cache *iint;
 
 	if (!ima_policy_flag || !S_ISREG(inode->i_mode))
 		return;
 
-	iint = ima_iint_find(inode);
+	iint = integrity_iint_find(inode);
 	if (!iint)
 		return;
 
@@ -209,7 +209,7 @@ static int process_measurement(struct file *file, const struct cred *cred,
 			       enum ima_hooks func)
 {
 	struct inode *backing_inode, *inode = file_inode(file);
-	struct ima_iint_cache *iint = NULL;
+	struct integrity_iint_cache *iint = NULL;
 	struct ima_template_desc *template_desc = NULL;
 	char *pathbuf = NULL;
 	char filename[NAME_MAX];
@@ -248,7 +248,7 @@ static int process_measurement(struct file *file, const struct cred *cred,
 	inode_lock(inode);
 
 	if (action) {
-		iint = ima_inode_get(inode);
+		iint = integrity_inode_get(inode);
 		if (!iint)
 			rc = -ENOMEM;
 	}
@@ -427,8 +427,8 @@ out:
  * On success return 0.  On integrity appraisal error, assuming the file
  * is in policy and IMA-appraisal is in enforcing mode, return -EACCES.
  */
-static int ima_file_mmap(struct file *file, unsigned long reqprot,
-			 unsigned long prot, unsigned long flags)
+int ima_file_mmap(struct file *file, unsigned long reqprot,
+		  unsigned long prot, unsigned long flags)
 {
 	u32 secid;
 	int ret;
@@ -455,8 +455,7 @@ static int ima_file_mmap(struct file *file, unsigned long reqprot,
 /**
  * ima_file_mprotect - based on policy, limit mprotect change
  * @vma: vm_area_struct protection is set to
- * @reqprot: protection requested by the application
- * @prot: protection that will be applied by the kernel
+ * @prot: contains the protection that will be applied by the kernel.
  *
  * Files can be mmap'ed read/write and later changed to execute to circumvent
  * IMA's mmap appraisal policy rules.  Due to locking issues (mmap semaphore
@@ -466,8 +465,7 @@ static int ima_file_mmap(struct file *file, unsigned long reqprot,
  *
  * On mprotect change success, return 0.  On failure, return -EACESS.
  */
-static int ima_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
-			     unsigned long prot)
+int ima_file_mprotect(struct vm_area_struct *vma, unsigned long prot)
 {
 	struct ima_template_desc *template = NULL;
 	struct file *file;
@@ -525,7 +523,7 @@ static int ima_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
  * On success return 0.  On integrity appraisal error, assuming the file
  * is in policy and IMA-appraisal is in enforcing mode, return -EACCES.
  */
-static int ima_bprm_check(struct linux_binprm *bprm)
+int ima_bprm_check(struct linux_binprm *bprm)
 {
 	int ret;
 	u32 secid;
@@ -551,7 +549,7 @@ static int ima_bprm_check(struct linux_binprm *bprm)
  * On success return 0.  On integrity appraisal error, assuming the file
  * is in policy and IMA-appraisal is in enforcing mode, return -EACCES.
  */
-static int ima_file_check(struct file *file, int mask)
+int ima_file_check(struct file *file, int mask)
 {
 	u32 secid;
 
@@ -560,15 +558,16 @@ static int ima_file_check(struct file *file, int mask)
 				   mask & (MAY_READ | MAY_WRITE | MAY_EXEC |
 					   MAY_APPEND), FILE_CHECK);
 }
+EXPORT_SYMBOL_GPL(ima_file_check);
 
 static int __ima_inode_hash(struct inode *inode, struct file *file, char *buf,
 			    size_t buf_size)
 {
-	struct ima_iint_cache *iint = NULL, tmp_iint;
+	struct integrity_iint_cache *iint = NULL, tmp_iint;
 	int rc, hash_algo;
 
 	if (ima_policy_flag) {
-		iint = ima_iint_find(inode);
+		iint = integrity_iint_find(inode);
 		if (iint)
 			mutex_lock(&iint->mutex);
 	}
@@ -578,6 +577,7 @@ static int __ima_inode_hash(struct inode *inode, struct file *file, char *buf,
 			mutex_unlock(&iint->mutex);
 
 		memset(&tmp_iint, 0, sizeof(tmp_iint));
+		tmp_iint.inode = inode;
 		mutex_init(&tmp_iint.mutex);
 
 		rc = ima_collect_measurement(&tmp_iint, file, NULL, 0,
@@ -683,11 +683,10 @@ EXPORT_SYMBOL_GPL(ima_inode_hash);
  * Skip calling process_measurement(), but indicate which newly, created
  * tmpfiles are in policy.
  */
-static void ima_post_create_tmpfile(struct mnt_idmap *idmap,
-				    struct inode *inode)
-
+void ima_post_create_tmpfile(struct mnt_idmap *idmap,
+			     struct inode *inode)
 {
-	struct ima_iint_cache *iint;
+	struct integrity_iint_cache *iint;
 	int must_appraise;
 
 	if (!ima_policy_flag || !S_ISREG(inode->i_mode))
@@ -699,7 +698,7 @@ static void ima_post_create_tmpfile(struct mnt_idmap *idmap,
 		return;
 
 	/* Nothing to do if we can't allocate memory */
-	iint = ima_inode_get(inode);
+	iint = integrity_inode_get(inode);
 	if (!iint)
 		return;
 
@@ -716,9 +715,10 @@ static void ima_post_create_tmpfile(struct mnt_idmap *idmap,
  * Mark files created via the mknodat syscall as new, so that the
  * file data can be written later.
  */
-static void ima_post_path_mknod(struct mnt_idmap *idmap, struct dentry *dentry)
+void ima_post_path_mknod(struct mnt_idmap *idmap,
+			 struct dentry *dentry)
 {
-	struct ima_iint_cache *iint;
+	struct integrity_iint_cache *iint;
 	struct inode *inode = dentry->d_inode;
 	int must_appraise;
 
@@ -731,7 +731,7 @@ static void ima_post_path_mknod(struct mnt_idmap *idmap, struct dentry *dentry)
 		return;
 
 	/* Nothing to do if we can't allocate memory */
-	iint = ima_inode_get(inode);
+	iint = integrity_inode_get(inode);
 	if (!iint)
 		return;
 
@@ -751,8 +751,8 @@ static void ima_post_path_mknod(struct mnt_idmap *idmap, struct dentry *dentry)
  *
  * For permission return 0, otherwise return -EACCES.
  */
-static int ima_read_file(struct file *file, enum kernel_read_file_id read_id,
-			 bool contents)
+int ima_read_file(struct file *file, enum kernel_read_file_id read_id,
+		  bool contents)
 {
 	enum ima_hooks func;
 	u32 secid;
@@ -801,8 +801,8 @@ const int read_idmap[READING_MAX_ID] = {
  * On success return 0.  On integrity appraisal error, assuming the file
  * is in policy and IMA-appraisal is in enforcing mode, return -EACCES.
  */
-static int ima_post_read_file(struct file *file, char *buf, loff_t size,
-			      enum kernel_read_file_id read_id)
+int ima_post_read_file(struct file *file, void *buf, loff_t size,
+		       enum kernel_read_file_id read_id)
 {
 	enum ima_hooks func;
 	u32 secid;
@@ -835,7 +835,7 @@ static int ima_post_read_file(struct file *file, char *buf, loff_t size,
  *
  * For permission return 0, otherwise return -EACCES.
  */
-static int ima_load_data(enum kernel_load_data_id id, bool contents)
+int ima_load_data(enum kernel_load_data_id id, bool contents)
 {
 	bool ima_enforce, sig_enforce;
 
@@ -889,9 +889,9 @@ static int ima_load_data(enum kernel_load_data_id id, bool contents)
  * On success return 0.  On integrity appraisal error, assuming the file
  * is in policy and IMA-appraisal is in enforcing mode, return -EACCES.
  */
-static int ima_post_load_data(char *buf, loff_t size,
-			      enum kernel_load_data_id load_id,
-			      char *description)
+int ima_post_load_data(char *buf, loff_t size,
+		       enum kernel_load_data_id load_id,
+		       char *description)
 {
 	if (load_id == LOADING_FIRMWARE) {
 		if ((ima_appraise & IMA_APPRAISE_FIRMWARE) &&
@@ -934,7 +934,7 @@ int process_buffer_measurement(struct mnt_idmap *idmap,
 	int ret = 0;
 	const char *audit_cause = "ENOMEM";
 	struct ima_template_entry *entry = NULL;
-	struct ima_iint_cache iint = {};
+	struct integrity_iint_cache iint = {};
 	struct ima_event_data event_data = {.iint = &iint,
 					    .filename = eventname,
 					    .buf = buf,
@@ -1089,39 +1089,6 @@ int ima_measure_critical_data(const char *event_label,
 }
 EXPORT_SYMBOL_GPL(ima_measure_critical_data);
 
-#ifdef CONFIG_INTEGRITY_ASYMMETRIC_KEYS
-
-/**
- * ima_kernel_module_request - Prevent crypto-pkcs1pad(rsa,*) requests
- * @kmod_name: kernel module name
- *
- * Avoid a verification loop where verifying the signature of the modprobe
- * binary requires executing modprobe itself. Since the modprobe iint->mutex
- * is already held when the signature verification is performed, a deadlock
- * occurs as soon as modprobe is executed within the critical region, since
- * the same lock cannot be taken again.
- *
- * This happens when public_key_verify_signature(), in case of RSA algorithm,
- * use alg_name to store internal information in order to construct an
- * algorithm on the fly, but crypto_larval_lookup() will try to use alg_name
- * in order to load a kernel module with same name.
- *
- * Since we don't have any real "crypto-pkcs1pad(rsa,*)" kernel modules,
- * we are safe to fail such module request from crypto_larval_lookup(), and
- * avoid the verification loop.
- *
- * Return: Zero if it is safe to load the kernel module, -EINVAL otherwise.
- */
-static int ima_kernel_module_request(char *kmod_name)
-{
-	if (strncmp(kmod_name, "crypto-pkcs1pad(rsa,", 20) == 0)
-		return -EINVAL;
-
-	return 0;
-}
-
-#endif /* CONFIG_INTEGRITY_ASYMMETRIC_KEYS */
-
 static int __init init_ima(void)
 {
 	int error;
@@ -1152,50 +1119,5 @@ static int __init init_ima(void)
 
 	return error;
 }
-
-static struct security_hook_list ima_hooks[] __ro_after_init = {
-	LSM_HOOK_INIT(bprm_check_security, ima_bprm_check),
-	LSM_HOOK_INIT(file_post_open, ima_file_check),
-	LSM_HOOK_INIT(inode_post_create_tmpfile, ima_post_create_tmpfile),
-	LSM_HOOK_INIT(file_release, ima_file_free),
-	LSM_HOOK_INIT(mmap_file, ima_file_mmap),
-	LSM_HOOK_INIT(file_mprotect, ima_file_mprotect),
-	LSM_HOOK_INIT(kernel_load_data, ima_load_data),
-	LSM_HOOK_INIT(kernel_post_load_data, ima_post_load_data),
-	LSM_HOOK_INIT(kernel_read_file, ima_read_file),
-	LSM_HOOK_INIT(kernel_post_read_file, ima_post_read_file),
-	LSM_HOOK_INIT(path_post_mknod, ima_post_path_mknod),
-#ifdef CONFIG_IMA_MEASURE_ASYMMETRIC_KEYS
-	LSM_HOOK_INIT(key_post_create_or_update, ima_post_key_create_or_update),
-#endif
-#ifdef CONFIG_INTEGRITY_ASYMMETRIC_KEYS
-	LSM_HOOK_INIT(kernel_module_request, ima_kernel_module_request),
-#endif
-	LSM_HOOK_INIT(inode_free_security, ima_inode_free),
-};
-
-static const struct lsm_id ima_lsmid = {
-	.name = "ima",
-	.id = LSM_ID_IMA,
-};
-
-static int __init init_ima_lsm(void)
-{
-	ima_iintcache_init();
-	security_add_hooks(ima_hooks, ARRAY_SIZE(ima_hooks), &ima_lsmid);
-	init_ima_appraise_lsm(&ima_lsmid);
-	return 0;
-}
-
-struct lsm_blob_sizes ima_blob_sizes __ro_after_init = {
-	.lbs_inode = sizeof(struct ima_iint_cache *),
-};
-
-DEFINE_LSM(ima) = {
-	.name = "ima",
-	.init = init_ima_lsm,
-	.order = LSM_ORDER_LAST,
-	.blobs = &ima_blob_sizes,
-};
 
 late_initcall(init_ima);	/* Start IMA after the TPM is available */

@@ -477,9 +477,9 @@ int cxl_hdm_decode_init(struct cxl_dev_state *cxlds, struct cxl_hdm *cxlhdm,
 		allowed++;
 	}
 
-	if (!allowed && info->mem_enabled) {
-		dev_err(dev, "Range register decodes outside platform defined CXL ranges.\n");
-		return -ENXIO;
+	if (!allowed) {
+		cxl_set_mem_enable(cxlds, 0);
+		info->mem_enabled = 0;
 	}
 
 	/*
@@ -518,14 +518,14 @@ EXPORT_SYMBOL_NS_GPL(cxl_hdm_decode_init, CXL);
 	 FIELD_PREP(CXL_DOE_TABLE_ACCESS_ENTRY_HANDLE, (entry_handle)))
 
 static int cxl_cdat_get_length(struct device *dev,
-			       struct pci_doe_mb *doe_mb,
+			       struct pci_doe_mb *cdat_doe,
 			       size_t *length)
 {
 	__le32 request = CDAT_DOE_REQ(0);
 	__le32 response[2];
 	int rc;
 
-	rc = pci_doe(doe_mb, PCI_DVSEC_VENDOR_ID_CXL,
+	rc = pci_doe(cdat_doe, PCI_DVSEC_VENDOR_ID_CXL,
 		     CXL_DOE_PROTOCOL_TABLE_ACCESS,
 		     &request, sizeof(request),
 		     &response, sizeof(response));
@@ -543,58 +543,56 @@ static int cxl_cdat_get_length(struct device *dev,
 }
 
 static int cxl_cdat_read_table(struct device *dev,
-			       struct pci_doe_mb *doe_mb,
-			       struct cdat_doe_rsp *rsp, size_t *length)
+			       struct pci_doe_mb *cdat_doe,
+			       void *cdat_table, size_t *cdat_length)
 {
-	size_t received, remaining = *length;
-	unsigned int entry_handle = 0;
-	union cdat_data *data;
+	size_t length = *cdat_length + sizeof(__le32);
+	__le32 *data = cdat_table;
+	int entry_handle = 0;
 	__le32 saved_dw = 0;
 
 	do {
 		__le32 request = CDAT_DOE_REQ(entry_handle);
+		struct cdat_entry_header *entry;
+		size_t entry_dw;
 		int rc;
 
-		rc = pci_doe(doe_mb, PCI_DVSEC_VENDOR_ID_CXL,
+		rc = pci_doe(cdat_doe, PCI_DVSEC_VENDOR_ID_CXL,
 			     CXL_DOE_PROTOCOL_TABLE_ACCESS,
 			     &request, sizeof(request),
-			     rsp, sizeof(*rsp) + remaining);
+			     data, length);
 		if (rc < 0) {
 			dev_err(dev, "DOE failed: %d", rc);
 			return rc;
 		}
 
-		if (rc < sizeof(*rsp))
+		/* 1 DW Table Access Response Header + CDAT entry */
+		entry = (struct cdat_entry_header *)(data + 1);
+		if ((entry_handle == 0 &&
+		     rc != sizeof(__le32) + sizeof(struct cdat_header)) ||
+		    (entry_handle > 0 &&
+		     (rc < sizeof(__le32) + sizeof(*entry) ||
+		      rc != sizeof(__le32) + le16_to_cpu(entry->length))))
 			return -EIO;
-
-		data = (union cdat_data *)rsp->data;
-		received = rc - sizeof(*rsp);
-
-		if (entry_handle == 0) {
-			if (received != sizeof(data->header))
-				return -EIO;
-		} else {
-			if (received < sizeof(data->entry) ||
-			    received != le16_to_cpu(data->entry.length))
-				return -EIO;
-		}
 
 		/* Get the CXL table access header entry handle */
 		entry_handle = FIELD_GET(CXL_DOE_TABLE_ACCESS_ENTRY_HANDLE,
-					 le32_to_cpu(rsp->doe_header));
-
+					 le32_to_cpu(data[0]));
+		entry_dw = rc / sizeof(__le32);
+		/* Skip Header */
+		entry_dw -= 1;
 		/*
 		 * Table Access Response Header overwrote the last DW of
 		 * previous entry, so restore that DW
 		 */
-		rsp->doe_header = saved_dw;
-		remaining -= received;
-		rsp = (void *)rsp + received;
-		saved_dw = rsp->doe_header;
+		*data = saved_dw;
+		length -= entry_dw * sizeof(__le32);
+		data += entry_dw;
+		saved_dw = *data;
 	} while (entry_handle != CXL_DOE_TABLE_ACCESS_LAST_ENTRY);
 
 	/* Length in CDAT header may exceed concatenation of CDAT entries */
-	*length -= remaining;
+	*cdat_length -= length - sizeof(__le32);
 
 	return 0;
 }
@@ -619,11 +617,11 @@ void read_cdat_data(struct cxl_port *port)
 {
 	struct device *uport = port->uport_dev;
 	struct device *dev = &port->dev;
-	struct pci_doe_mb *doe_mb;
+	struct pci_doe_mb *cdat_doe;
 	struct pci_dev *pdev = NULL;
 	struct cxl_memdev *cxlmd;
-	struct cdat_doe_rsp *buf;
-	size_t table_length, length;
+	size_t cdat_length;
+	void *cdat_table, *cdat_buf;
 	int rc;
 
 	if (is_cxl_memdev(uport)) {
@@ -640,48 +638,39 @@ void read_cdat_data(struct cxl_port *port)
 	if (!pdev)
 		return;
 
-	doe_mb = pci_find_doe_mailbox(pdev, PCI_DVSEC_VENDOR_ID_CXL,
-				      CXL_DOE_PROTOCOL_TABLE_ACCESS);
-	if (!doe_mb) {
+	cdat_doe = pci_find_doe_mailbox(pdev, PCI_DVSEC_VENDOR_ID_CXL,
+					CXL_DOE_PROTOCOL_TABLE_ACCESS);
+	if (!cdat_doe) {
 		dev_dbg(dev, "No CDAT mailbox\n");
 		return;
 	}
 
 	port->cdat_available = true;
 
-	if (cxl_cdat_get_length(dev, doe_mb, &length)) {
+	if (cxl_cdat_get_length(dev, cdat_doe, &cdat_length)) {
 		dev_dbg(dev, "No CDAT length\n");
 		return;
 	}
 
-	/*
-	 * The begin of the CDAT buffer needs space for additional 4
-	 * bytes for the DOE header. Table data starts afterwards.
-	 */
-	buf = devm_kzalloc(dev, sizeof(*buf) + length, GFP_KERNEL);
-	if (!buf)
-		goto err;
+	cdat_buf = devm_kzalloc(dev, cdat_length + sizeof(__le32), GFP_KERNEL);
+	if (!cdat_buf)
+		return;
 
-	table_length = length;
-
-	rc = cxl_cdat_read_table(dev, doe_mb, buf, &length);
+	rc = cxl_cdat_read_table(dev, cdat_doe, cdat_buf, &cdat_length);
 	if (rc)
 		goto err;
 
-	if (table_length != length)
-		dev_warn(dev, "Malformed CDAT table length (%zu:%zu), discarding trailing data\n",
-			table_length, length);
-
-	if (cdat_checksum(buf->data, length))
+	cdat_table = cdat_buf + sizeof(__le32);
+	if (cdat_checksum(cdat_table, cdat_length))
 		goto err;
 
-	port->cdat.table = buf->data;
-	port->cdat.length = length;
-
+	port->cdat.table = cdat_table;
+	port->cdat.length = cdat_length;
 	return;
+
 err:
 	/* Don't leave table data allocated on error */
-	devm_kfree(dev, buf);
+	devm_kfree(dev, cdat_buf);
 	dev_err(dev, "Failed to read/validate CDAT.\n");
 }
 EXPORT_SYMBOL_NS_GPL(read_cdat_data, CXL);
@@ -943,21 +932,11 @@ static void cxl_handle_rdport_errors(struct cxl_dev_state *cxlds) { }
 void cxl_cor_error_detected(struct pci_dev *pdev)
 {
 	struct cxl_dev_state *cxlds = pci_get_drvdata(pdev);
-	struct device *dev = &cxlds->cxlmd->dev;
 
-	scoped_guard(device, dev) {
-		if (!dev->driver) {
-			dev_warn(&pdev->dev,
-				 "%s: memdev disabled, abort error handling\n",
-				 dev_name(dev));
-			return;
-		}
+	if (cxlds->rcd)
+		cxl_handle_rdport_errors(cxlds);
 
-		if (cxlds->rcd)
-			cxl_handle_rdport_errors(cxlds);
-
-		cxl_handle_endpoint_cor_ras(cxlds);
-	}
+	cxl_handle_endpoint_cor_ras(cxlds);
 }
 EXPORT_SYMBOL_NS_GPL(cxl_cor_error_detected, CXL);
 
@@ -969,25 +948,16 @@ pci_ers_result_t cxl_error_detected(struct pci_dev *pdev,
 	struct device *dev = &cxlmd->dev;
 	bool ue;
 
-	scoped_guard(device, dev) {
-		if (!dev->driver) {
-			dev_warn(&pdev->dev,
-				 "%s: memdev disabled, abort error handling\n",
-				 dev_name(dev));
-			return PCI_ERS_RESULT_DISCONNECT;
-		}
+	if (cxlds->rcd)
+		cxl_handle_rdport_errors(cxlds);
 
-		if (cxlds->rcd)
-			cxl_handle_rdport_errors(cxlds);
-		/*
-		 * A frozen channel indicates an impending reset which is fatal to
-		 * CXL.mem operation, and will likely crash the system. On the off
-		 * chance the situation is recoverable dump the status of the RAS
-		 * capability registers and bounce the active state of the memdev.
-		 */
-		ue = cxl_handle_endpoint_ras(cxlds);
-	}
-
+	/*
+	 * A frozen channel indicates an impending reset which is fatal to
+	 * CXL.mem operation, and will likely crash the system. On the off
+	 * chance the situation is recoverable dump the status of the RAS
+	 * capability registers and bounce the active state of the memdev.
+	 */
+	ue = cxl_handle_endpoint_ras(cxlds);
 
 	switch (state) {
 	case pci_channel_io_normal:

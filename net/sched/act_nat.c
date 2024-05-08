@@ -324,7 +324,6 @@ static struct tc_action_ops act_nat_ops = {
 	.cleanup	=	tcf_nat_cleanup,
 	.size		=	sizeof(struct tcf_nat),
 };
-MODULE_ALIAS_NET_ACT("nat");
 
 static __net_init int nat_init_net(struct net *net)
 {

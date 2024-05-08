@@ -71,15 +71,13 @@ nfsd3_proc_setattr(struct svc_rqst *rqstp)
 	struct nfsd_attrs attrs = {
 		.na_iattr	= &argp->attrs,
 	};
-	const struct timespec64 *guardtime = NULL;
 
 	dprintk("nfsd: SETATTR(3)  %s\n",
 				SVCFH_fmt(&argp->fh));
 
 	fh_copy(&resp->fh, &argp->fh);
-	if (argp->check_guard)
-		guardtime = &argp->guardtime;
-	resp->status = nfsd_setattr(rqstp, &resp->fh, &attrs, guardtime);
+	resp->status = nfsd_setattr(rqstp, &resp->fh, &attrs,
+				    argp->check_guard, argp->guardtime);
 	return rpc_success;
 }
 

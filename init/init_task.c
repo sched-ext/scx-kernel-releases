@@ -6,7 +6,6 @@
 #include <linux/sched/sysctl.h>
 #include <linux/sched/rt.h>
 #include <linux/sched/task.h>
-#include <linux/sched/ext.h>
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
@@ -99,17 +98,6 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 #ifdef CONFIG_CGROUP_SCHED
 	.sched_task_group = &root_task_group,
 #endif
-#ifdef CONFIG_SCHED_CLASS_EXT
-	.scx		= {
-		.dsq_node.list	= LIST_HEAD_INIT(init_task.scx.dsq_node.list),
-		.sticky_cpu	= -1,
-		.holding_cpu	= -1,
-		.runnable_node	= LIST_HEAD_INIT(init_task.scx.runnable_node),
-		.runnable_at	= INITIAL_JIFFIES,
-		.ddsp_dsq_id	= SCX_DSQ_INVALID,
-		.slice		= SCX_SLICE_DFL,
-	},
-#endif
 	.ptraced	= LIST_HEAD_INIT(init_task.ptraced),
 	.ptrace_entry	= LIST_HEAD_INIT(init_task.ptrace_entry),
 	.real_parent	= &init_task,
@@ -159,7 +147,6 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 	.rcu_tasks_holdout = false,
 	.rcu_tasks_holdout_list = LIST_HEAD_INIT(init_task.rcu_tasks_holdout_list),
 	.rcu_tasks_idle_cpu = -1,
-	.rcu_tasks_exit_list = LIST_HEAD_INIT(init_task.rcu_tasks_exit_list),
 #endif
 #ifdef CONFIG_TASKS_TRACE_RCU
 	.trc_reader_nesting = 0,

@@ -365,13 +365,8 @@ void vcpu_arch_dump(FILE *stream, struct kvm_vcpu *vcpu, uint8_t indent)
 		indent, "", pstate, pc);
 }
 
-void vcpu_arch_set_entry_point(struct kvm_vcpu *vcpu, void *guest_code)
-{
-	vcpu_set_reg(vcpu, ARM64_CORE_REG(regs.pc), (uint64_t)guest_code);
-}
-
-static struct kvm_vcpu *__aarch64_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
-					   struct kvm_vcpu_init *init)
+struct kvm_vcpu *aarch64_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
+				  struct kvm_vcpu_init *init, void *guest_code)
 {
 	size_t stack_size;
 	uint64_t stack_vaddr;
@@ -386,22 +381,15 @@ static struct kvm_vcpu *__aarch64_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
 	aarch64_vcpu_setup(vcpu, init);
 
 	vcpu_set_reg(vcpu, ARM64_CORE_REG(sp_el1), stack_vaddr + stack_size);
-	return vcpu;
-}
-
-struct kvm_vcpu *aarch64_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
-				  struct kvm_vcpu_init *init, void *guest_code)
-{
-	struct kvm_vcpu *vcpu = __aarch64_vcpu_add(vm, vcpu_id, init);
-
-	vcpu_arch_set_entry_point(vcpu, guest_code);
+	vcpu_set_reg(vcpu, ARM64_CORE_REG(regs.pc), (uint64_t)guest_code);
 
 	return vcpu;
 }
 
-struct kvm_vcpu *vm_arch_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id)
+struct kvm_vcpu *vm_arch_vcpu_add(struct kvm_vm *vm, uint32_t vcpu_id,
+				  void *guest_code)
 {
-	return __aarch64_vcpu_add(vm, vcpu_id, NULL);
+	return aarch64_vcpu_add(vm, vcpu_id, NULL, guest_code);
 }
 
 void vcpu_args_set(struct kvm_vcpu *vcpu, unsigned int num, ...)
@@ -410,7 +398,7 @@ void vcpu_args_set(struct kvm_vcpu *vcpu, unsigned int num, ...)
 	int i;
 
 	TEST_ASSERT(num >= 1 && num <= 8, "Unsupported number of args,\n"
-		    "  num: %u", num);
+		    "  num: %u\n", num);
 
 	va_start(ap, num);
 

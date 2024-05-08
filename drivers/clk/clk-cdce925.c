@@ -101,6 +101,7 @@ static void cdce925_pll_find_rate(unsigned long rate,
 
 	if (rate <= parent_rate) {
 		/* Can always deliver parent_rate in bypass mode */
+		rate = parent_rate;
 		*n = 0;
 		*m = 0;
 	} else {

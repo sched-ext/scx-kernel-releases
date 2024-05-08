@@ -34,7 +34,6 @@ config RAVB
 	select MII
 	select MDIO_BITBANG
 	select PHYLIB
-	select RESET_CONTROLLER
 	help
 	  Renesas Ethernet AVB device driver.
 

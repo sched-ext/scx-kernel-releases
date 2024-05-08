@@ -589,7 +589,7 @@ static void etm_event_stop(struct perf_event *event, int mode)
 		return;
 
 	/* stop tracer */
-	coresight_disable_source(csdev, event);
+	source_ops(csdev)->disable(csdev, event);
 
 	/* tell the core */
 	event->hw.state = PERF_HES_STOPPED;

@@ -34,8 +34,7 @@
 
 /* Limit how long of an event name plus args within the subsystem. */
 #define MAX_EVENT_DESC 512
-#define EVENT_NAME(user_event) ((user_event)->reg_name)
-#define EVENT_TP_NAME(user_event) ((user_event)->tracepoint.name)
+#define EVENT_NAME(user_event) ((user_event)->tracepoint.name)
 #define MAX_FIELD_ARRAY_SIZE 1024
 
 /*
@@ -55,13 +54,10 @@
  * allows isolation for events by various means.
  */
 struct user_event_group {
-	char			*system_name;
-	char			*system_multi_name;
-	struct hlist_node	node;
-	struct mutex		reg_mutex;
+	char		*system_name;
+	struct		hlist_node node;
+	struct		mutex reg_mutex;
 	DECLARE_HASHTABLE(register_table, 8);
-	/* ID that moves forward within the group for multi-event names */
-	u64			multi_id;
 };
 
 /* Group for init_user_ns mapping, top-most group */
@@ -82,7 +78,6 @@ static unsigned int current_user_events;
  */
 struct user_event {
 	struct user_event_group		*group;
-	char				*reg_name;
 	struct tracepoint		tracepoint;
 	struct trace_event_call		call;
 	struct trace_event_class	class;
@@ -131,8 +126,6 @@ struct user_event_enabler {
 #define ENABLE_BITOPS(e) (&(e)->values)
 
 #define ENABLE_BIT(e) ((int)((e)->values & ENABLE_VAL_BIT_MASK))
-
-#define EVENT_MULTI_FORMAT(f) ((f) & USER_EVENT_REG_MULTI_FORMAT)
 
 /* Used for asynchronous faulting in of pages */
 struct user_event_enabler_fault {
@@ -209,8 +202,6 @@ static struct user_event_mm *user_event_mm_get(struct user_event_mm *mm);
 static struct user_event_mm *user_event_mm_get_all(struct user_event *user);
 static void user_event_mm_put(struct user_event_mm *mm);
 static int destroy_user_event(struct user_event *user);
-static bool user_fields_match(struct user_event *user, int argc,
-			      const char **argv);
 
 static u32 user_event_key(char *name)
 {
@@ -337,7 +328,6 @@ out:
 static void user_event_group_destroy(struct user_event_group *group)
 {
 	kfree(group->system_name);
-	kfree(group->system_multi_name);
 	kfree(group);
 }
 
@@ -354,11 +344,6 @@ static char *user_event_group_system_name(void)
 	snprintf(system_name, len, "%s", USER_EVENTS_SYSTEM);
 
 	return system_name;
-}
-
-static char *user_event_group_system_multi_name(void)
-{
-	return kstrdup(USER_EVENTS_MULTI_SYSTEM, GFP_KERNEL);
 }
 
 static struct user_event_group *current_user_event_group(void)
@@ -378,11 +363,6 @@ static struct user_event_group *user_event_group_create(void)
 	group->system_name = user_event_group_system_name();
 
 	if (!group->system_name)
-		goto error;
-
-	group->system_multi_name = user_event_group_system_multi_name();
-
-	if (!group->system_multi_name)
 		goto error;
 
 	mutex_init(&group->reg_mutex);
@@ -1500,11 +1480,6 @@ static int destroy_user_event(struct user_event *user)
 	hash_del(&user->node);
 
 	user_event_destroy_validators(user);
-
-	/* If we have different names, both must be freed */
-	if (EVENT_NAME(user) != EVENT_TP_NAME(user))
-		kfree(EVENT_TP_NAME(user));
-
 	kfree(user->call.print_fmt);
 	kfree(EVENT_NAME(user));
 	kfree(user);
@@ -1518,35 +1493,16 @@ static int destroy_user_event(struct user_event *user)
 }
 
 static struct user_event *find_user_event(struct user_event_group *group,
-					  char *name, int argc, const char **argv,
-					  u32 flags, u32 *outkey)
+					  char *name, u32 *outkey)
 {
 	struct user_event *user;
 	u32 key = user_event_key(name);
 
 	*outkey = key;
 
-	hash_for_each_possible(group->register_table, user, node, key) {
-		/*
-		 * Single-format events shouldn't return multi-format
-		 * events. Callers expect the underlying tracepoint to match
-		 * the name exactly in these cases. Only check like-formats.
-		 */
-		if (EVENT_MULTI_FORMAT(flags) != EVENT_MULTI_FORMAT(user->reg_flags))
-			continue;
-
-		if (strcmp(EVENT_NAME(user), name))
-			continue;
-
-		if (user_fields_match(user, argc, argv))
+	hash_for_each_possible(group->register_table, user, node, key)
+		if (!strcmp(EVENT_NAME(user), name))
 			return user_event_get(user);
-
-		/* Scan others if this is a multi-format event */
-		if (EVENT_MULTI_FORMAT(flags))
-			continue;
-
-		return ERR_PTR(-EADDRINUSE);
-	}
 
 	return NULL;
 }
@@ -1904,9 +1860,6 @@ static bool user_fields_match(struct user_event *user, int argc,
 	struct list_head *head = &user->fields;
 	int i = 0;
 
-	if (argc == 0)
-		return list_empty(head);
-
 	list_for_each_entry_reverse(field, head, link) {
 		if (!user_field_match(field, argc, argv, &i))
 			return false;
@@ -1924,15 +1877,13 @@ static bool user_event_match(const char *system, const char *event,
 	struct user_event *user = container_of(ev, struct user_event, devent);
 	bool match;
 
-	match = strcmp(EVENT_NAME(user), event) == 0;
+	match = strcmp(EVENT_NAME(user), event) == 0 &&
+		(!system || strcmp(system, USER_EVENTS_SYSTEM) == 0);
 
-	if (match && system) {
-		match = strcmp(system, user->group->system_name) == 0 ||
-			strcmp(system, user->group->system_multi_name) == 0;
-	}
-
-	if (match)
+	if (match && argc > 0)
 		match = user_fields_match(user, argc, argv);
+	else if (match && argc == 0)
+		match = list_empty(&user->fields);
 
 	return match;
 }
@@ -1962,33 +1913,6 @@ static int user_event_trace_register(struct user_event *user)
 	return ret;
 }
 
-static int user_event_set_tp_name(struct user_event *user)
-{
-	lockdep_assert_held(&user->group->reg_mutex);
-
-	if (EVENT_MULTI_FORMAT(user->reg_flags)) {
-		char *multi_name;
-
-		multi_name = kasprintf(GFP_KERNEL_ACCOUNT, "%s.%llx",
-				       user->reg_name, user->group->multi_id);
-
-		if (!multi_name)
-			return -ENOMEM;
-
-		user->call.name = multi_name;
-		user->tracepoint.name = multi_name;
-
-		/* Inc to ensure unique multi-event name next time */
-		user->group->multi_id++;
-	} else {
-		/* Non Multi-format uses register name */
-		user->call.name = user->reg_name;
-		user->tracepoint.name = user->reg_name;
-	}
-
-	return 0;
-}
-
 /*
  * Parses the event name, arguments and flags then registers if successful.
  * The name buffer lifetime is owned by this method for success cases only.
@@ -1998,11 +1922,11 @@ static int user_event_parse(struct user_event_group *group, char *name,
 			    char *args, char *flags,
 			    struct user_event **newuser, int reg_flags)
 {
-	struct user_event *user;
-	char **argv = NULL;
-	int argc = 0;
 	int ret;
 	u32 key;
+	struct user_event *user;
+	int argc = 0;
+	char **argv;
 
 	/* Currently don't support any text based flags */
 	if (flags != NULL)
@@ -2011,34 +1935,41 @@ static int user_event_parse(struct user_event_group *group, char *name,
 	if (!user_event_capable(reg_flags))
 		return -EPERM;
 
-	if (args) {
-		argv = argv_split(GFP_KERNEL, args, &argc);
-
-		if (!argv)
-			return -ENOMEM;
-	}
-
 	/* Prevent dyn_event from racing */
 	mutex_lock(&event_mutex);
-	user = find_user_event(group, name, argc, (const char **)argv,
-			       reg_flags, &key);
+	user = find_user_event(group, name, &key);
 	mutex_unlock(&event_mutex);
 
-	if (argv)
-		argv_free(argv);
-
-	if (IS_ERR(user))
-		return PTR_ERR(user);
-
 	if (user) {
-		*newuser = user;
-		/*
-		 * Name is allocated by caller, free it since it already exists.
-		 * Caller only worries about failure cases for freeing.
-		 */
-		kfree(name);
+		if (args) {
+			argv = argv_split(GFP_KERNEL, args, &argc);
+			if (!argv) {
+				ret = -ENOMEM;
+				goto error;
+			}
+
+			ret = user_fields_match(user, argc, (const char **)argv);
+			argv_free(argv);
+
+		} else
+			ret = list_empty(&user->fields);
+
+		if (ret) {
+			*newuser = user;
+			/*
+			 * Name is allocated by caller, free it since it already exists.
+			 * Caller only worries about failure cases for freeing.
+			 */
+			kfree(name);
+		} else {
+			ret = -EADDRINUSE;
+			goto error;
+		}
 
 		return 0;
+error:
+		user_event_put(user, false);
+		return ret;
 	}
 
 	user = kzalloc(sizeof(*user), GFP_KERNEL_ACCOUNT);
@@ -2051,13 +1982,7 @@ static int user_event_parse(struct user_event_group *group, char *name,
 	INIT_LIST_HEAD(&user->validators);
 
 	user->group = group;
-	user->reg_name = name;
-	user->reg_flags = reg_flags;
-
-	ret = user_event_set_tp_name(user);
-
-	if (ret)
-		goto put_user;
+	user->tracepoint.name = name;
 
 	ret = user_event_parse_fields(user, args);
 
@@ -2071,14 +1996,11 @@ static int user_event_parse(struct user_event_group *group, char *name,
 
 	user->call.data = user;
 	user->call.class = &user->class;
+	user->call.name = name;
 	user->call.flags = TRACE_EVENT_FL_TRACEPOINT;
 	user->call.tp = &user->tracepoint;
 	user->call.event.funcs = &user_event_funcs;
-
-	if (EVENT_MULTI_FORMAT(user->reg_flags))
-		user->class.system = group->system_multi_name;
-	else
-		user->class.system = group->system_name;
+	user->class.system = group->system_name;
 
 	user->class.fields_array = user_event_fields_array;
 	user->class.get_fields = user_event_get_fields;
@@ -2099,6 +2021,8 @@ static int user_event_parse(struct user_event_group *group, char *name,
 
 	if (ret)
 		goto put_user_lock;
+
+	user->reg_flags = reg_flags;
 
 	if (user->reg_flags & USER_EVENT_REG_PERSIST) {
 		/* Ensure we track self ref and caller ref (2) */
@@ -2123,43 +2047,30 @@ put_user:
 	user_event_destroy_fields(user);
 	user_event_destroy_validators(user);
 	kfree(user->call.print_fmt);
-
-	/* Caller frees reg_name on error, but not multi-name */
-	if (EVENT_NAME(user) != EVENT_TP_NAME(user))
-		kfree(EVENT_TP_NAME(user));
-
 	kfree(user);
 	return ret;
 }
 
 /*
- * Deletes previously created events if they are no longer being used.
+ * Deletes a previously created event if it is no longer being used.
  */
 static int delete_user_event(struct user_event_group *group, char *name)
 {
-	struct user_event *user;
-	struct hlist_node *tmp;
-	u32 key = user_event_key(name);
-	int ret = -ENOENT;
+	u32 key;
+	struct user_event *user = find_user_event(group, name, &key);
 
-	/* Attempt to delete all event(s) with the name passed in */
-	hash_for_each_possible_safe(group->register_table, user, tmp, node, key) {
-		if (strcmp(EVENT_NAME(user), name))
-			continue;
+	if (!user)
+		return -ENOENT;
 
-		if (!user_event_last_ref(user))
-			return -EBUSY;
+	user_event_put(user, true);
 
-		if (!user_event_capable(user->reg_flags))
-			return -EPERM;
+	if (!user_event_last_ref(user))
+		return -EBUSY;
 
-		ret = destroy_user_event(user);
+	if (!user_event_capable(user->reg_flags))
+		return -EPERM;
 
-		if (ret)
-			goto out;
-	}
-out:
-	return ret;
+	return destroy_user_event(user);
 }
 
 /*
@@ -2717,7 +2628,7 @@ static int user_seq_show(struct seq_file *m, void *p)
 	hash_for_each(group->register_table, i, user, node) {
 		status = user->status;
 
-		seq_printf(m, "%s", EVENT_TP_NAME(user));
+		seq_printf(m, "%s", EVENT_NAME(user));
 
 		if (status != 0)
 			seq_puts(m, " #");

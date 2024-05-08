@@ -193,7 +193,7 @@ static bool is_module_segment(unsigned long addr)
 	return true;
 }
 
-int mmu_mark_initmem_nx(void)
+void mmu_mark_initmem_nx(void)
 {
 	int nb = mmu_has_feature(MMU_FTR_USE_HIGH_BATS) ? 8 : 4;
 	int i;
@@ -230,10 +230,9 @@ int mmu_mark_initmem_nx(void)
 
 		mtsr(mfsr(i << 28) | 0x10000000, i << 28);
 	}
-	return 0;
 }
 
-int mmu_mark_rodata_ro(void)
+void mmu_mark_rodata_ro(void)
 {
 	int nb = mmu_has_feature(MMU_FTR_USE_HIGH_BATS) ? 8 : 4;
 	int i;
@@ -246,8 +245,6 @@ int mmu_mark_rodata_ro(void)
 	}
 
 	update_bats();
-
-	return 0;
 }
 
 /*

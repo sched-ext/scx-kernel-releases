@@ -210,6 +210,7 @@ static bool pmz_receive_chars(struct uart_pmac_port *uap)
 {
 	struct tty_port *port;
 	unsigned char ch, r1, drop, flag;
+	int loops = 0;
 
 	/* Sanity check, make sure the old bug is no longer happening */
 	if (uap->port.state == NULL) {
@@ -290,11 +291,24 @@ static bool pmz_receive_chars(struct uart_pmac_port *uap)
 		if (r1 & Rx_OVR)
 			tty_insert_flip_char(port, 0, TTY_OVERRUN);
 	next_char:
+		/* We can get stuck in an infinite loop getting char 0 when the
+		 * line is in a wrong HW state, we break that here.
+		 * When that happens, I disable the receive side of the driver.
+		 * Note that what I've been experiencing is a real irq loop where
+		 * I'm getting flooded regardless of the actual port speed.
+		 * Something strange is going on with the HW
+		 */
+		if ((++loops) > 1000)
+			goto flood;
 		ch = read_zsreg(uap, R0);
 		if (!(ch & Rx_CH_AV))
 			break;
 	}
 
+	return true;
+ flood:
+	pmz_interrupt_control(uap, 0);
+	pmz_error("pmz: rx irq flood !\n");
 	return true;
 }
 
@@ -1493,12 +1507,12 @@ static int pmz_attach(struct macio_dev *mdev, const struct of_device_id *match)
  * That one should not be called, macio isn't really a hotswap device,
  * we don't expect one of those serial ports to go away...
  */
-static void pmz_detach(struct macio_dev *mdev)
+static int pmz_detach(struct macio_dev *mdev)
 {
 	struct uart_pmac_port	*uap = dev_get_drvdata(&mdev->ofdev.dev);
 	
 	if (!uap)
-		return;
+		return -ENODEV;
 
 	uart_remove_one_port(&pmz_uart_reg, &uap->port);
 
@@ -1509,7 +1523,10 @@ static void pmz_detach(struct macio_dev *mdev)
 	dev_set_drvdata(&mdev->ofdev.dev, NULL);
 	uap->dev = NULL;
 	uap->port.dev = NULL;
+	
+	return 0;
 }
+
 
 static int pmz_suspend(struct macio_dev *mdev, pm_message_t pm_state)
 {
@@ -1700,13 +1717,18 @@ static int __init pmz_attach(struct platform_device *pdev)
 	return uart_add_one_port(&pmz_uart_reg, &uap->port);
 }
 
-static void __exit pmz_detach(struct platform_device *pdev)
+static int __exit pmz_detach(struct platform_device *pdev)
 {
 	struct uart_pmac_port *uap = platform_get_drvdata(pdev);
+
+	if (!uap)
+		return -ENODEV;
 
 	uart_remove_one_port(&pmz_uart_reg, &uap->port);
 
 	uap->port.dev = NULL;
+
+	return 0;
 }
 
 #endif /* !CONFIG_PPC_PMAC */
@@ -1775,7 +1797,7 @@ static struct macio_driver pmz_driver = {
 #else
 
 static struct platform_driver pmz_driver = {
-	.remove_new	= __exit_p(pmz_detach),
+	.remove		= __exit_p(pmz_detach),
 	.driver		= {
 		.name		= "scc",
 	},

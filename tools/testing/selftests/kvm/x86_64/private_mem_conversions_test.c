@@ -434,8 +434,6 @@ static void test_mem_conversions(enum vm_mem_backing_src_type src_type, uint32_t
 
 	r = fallocate(memfd, FALLOC_FL_KEEP_SIZE, 0, memfd_size);
 	TEST_ASSERT(!r, __KVM_SYSCALL_ERROR("fallocate()", r));
-
-	close(memfd);
 }
 
 static void usage(const char *cmd)

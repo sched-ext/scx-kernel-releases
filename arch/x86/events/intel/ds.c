@@ -5,7 +5,6 @@
 #include <linux/sched/clock.h>
 
 #include <asm/cpu_entry_area.h>
-#include <asm/debugreg.h>
 #include <asm/perf_event.h>
 #include <asm/tlbflush.h>
 #include <asm/insn.h>
@@ -1237,11 +1236,11 @@ pebs_update_state(bool needed_cb, struct cpu_hw_events *cpuc,
 	struct pmu *pmu = event->pmu;
 
 	/*
-	 * Make sure we get updated with the first PEBS event.
-	 * During removal, ->pebs_data_cfg is still valid for
-	 * the last PEBS event. Don't clear it.
+	 * Make sure we get updated with the first PEBS
+	 * event. It will trigger also during removal, but
+	 * that does not hurt:
 	 */
-	if ((cpuc->n_pebs == 1) && add)
+	if (cpuc->n_pebs == 1)
 		cpuc->pebs_data_cfg = PEBS_UPDATE_DS_SW;
 
 	if (needed_cb != pebs_needs_sched_cb(cpuc)) {

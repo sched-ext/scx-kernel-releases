@@ -508,13 +508,13 @@
 };
 
 &q6afedai {
-	dai@22 {
-		reg = <QUATERNARY_MI2S_RX>;
+	qi2s@22 {
+		reg = <22>;
 		qcom,sd-lines = <1>;
 	};
 
-	dai@23 {
-		reg = <QUATERNARY_MI2S_TX>;
+	qi2s@23 {
+		reg = <23>;
 		qcom,sd-lines = <0>;
 	};
 };

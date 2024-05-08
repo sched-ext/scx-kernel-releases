@@ -864,8 +864,11 @@ static int cipso_v4_map_cat_rbm_ntoh(const struct cipso_v4_doi *doi_def,
 					      net_clen_bits,
 					      net_spot + 1,
 					      1);
-		if (net_spot < 0)
+		if (net_spot < 0) {
+			if (net_spot == -2)
+				return -EFAULT;
 			return 0;
+		}
 
 		switch (doi_def->type) {
 		case CIPSO_V4_MAP_PASS:

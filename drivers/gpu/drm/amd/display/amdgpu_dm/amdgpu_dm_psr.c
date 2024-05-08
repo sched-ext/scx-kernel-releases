@@ -141,8 +141,9 @@ bool amdgpu_dm_link_setup_psr(struct dc_stream_state *stream)
  * amdgpu_dm_psr_enable() - enable psr f/w
  * @stream: stream state
  *
+ * Return: true if success
  */
-void amdgpu_dm_psr_enable(struct dc_stream_state *stream)
+bool amdgpu_dm_psr_enable(struct dc_stream_state *stream)
 {
 	struct dc_link *link = stream->link;
 	unsigned int vsync_rate_hz = 0;
@@ -189,10 +190,7 @@ void amdgpu_dm_psr_enable(struct dc_stream_state *stream)
 	if (link->psr_settings.psr_version < DC_PSR_VERSION_SU_1)
 		power_opt |= psr_power_opt_z10_static_screen;
 
-	dc_link_set_psr_allow_active(link, &psr_enable, false, false, &power_opt);
-
-	if (link->ctx->dc->caps.ips_support)
-		dc_allow_idle_optimizations(link->ctx->dc, true);
+	return dc_link_set_psr_allow_active(link, &psr_enable, false, false, &power_opt);
 }
 
 /*

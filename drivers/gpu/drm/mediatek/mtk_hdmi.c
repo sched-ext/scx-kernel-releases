@@ -1265,27 +1265,19 @@ static enum drm_connector_status mtk_hdmi_bridge_detect(struct drm_bridge *bridg
 	return mtk_hdmi_detect(hdmi);
 }
 
-static const struct drm_edid *mtk_hdmi_bridge_edid_read(struct drm_bridge *bridge,
-							struct drm_connector *connector)
+static struct edid *mtk_hdmi_bridge_get_edid(struct drm_bridge *bridge,
+					     struct drm_connector *connector)
 {
 	struct mtk_hdmi *hdmi = hdmi_ctx_from_bridge(bridge);
-	const struct drm_edid *drm_edid;
+	struct edid *edid;
 
 	if (!hdmi->ddc_adpt)
 		return NULL;
-	drm_edid = drm_edid_read_ddc(connector, hdmi->ddc_adpt);
-	if (drm_edid) {
-		/*
-		 * FIXME: This should use !connector->display_info.has_audio (or
-		 * !connector->display_info.is_hdmi) from a path that has read
-		 * the EDID and called drm_edid_connector_update().
-		 */
-		const struct edid *edid = drm_edid_raw(drm_edid);
-
-		hdmi->dvi_mode = !drm_detect_monitor_audio(edid);
-	}
-
-	return drm_edid;
+	edid = drm_get_edid(connector, hdmi->ddc_adpt);
+	if (!edid)
+		return NULL;
+	hdmi->dvi_mode = !drm_detect_monitor_audio(edid);
+	return edid;
 }
 
 static int mtk_hdmi_bridge_attach(struct drm_bridge *bridge,
@@ -1425,7 +1417,7 @@ static const struct drm_bridge_funcs mtk_hdmi_bridge_funcs = {
 	.atomic_pre_enable = mtk_hdmi_bridge_atomic_pre_enable,
 	.atomic_enable = mtk_hdmi_bridge_atomic_enable,
 	.detect = mtk_hdmi_bridge_detect,
-	.edid_read = mtk_hdmi_bridge_edid_read,
+	.get_edid = mtk_hdmi_bridge_get_edid,
 };
 
 static int mtk_hdmi_dt_parse_pdata(struct mtk_hdmi *hdmi,

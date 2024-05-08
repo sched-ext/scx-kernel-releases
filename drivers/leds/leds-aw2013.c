@@ -405,7 +405,6 @@ error_reg:
 			       chip->regulators);
 
 error:
-	mutex_unlock(&chip->mutex);
 	mutex_destroy(&chip->mutex);
 	return ret;
 }

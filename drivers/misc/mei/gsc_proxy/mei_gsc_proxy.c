@@ -96,8 +96,7 @@ static const struct component_master_ops mei_component_master_ops = {
  *
  *    The function checks if the device is pci device and
  *    Intel VGA adapter, the subcomponent is SW Proxy
- *    and the VGA is on the bus 0 reserved for built-in devices
- *    to reject discrete GFX.
+ *    and the parent of MEI PCI and the parent of VGA are the same PCH device.
  *
  * @dev: master device
  * @subcomponent: subcomponent to match (I915_COMPONENT_SWPROXY)
@@ -124,8 +123,7 @@ static int mei_gsc_proxy_component_match(struct device *dev, int subcomponent,
 	if (subcomponent != I915_COMPONENT_GSC_PROXY)
 		return 0;
 
-	/* Only built-in GFX */
-	return (pdev->bus->number == 0);
+	return component_compare_dev(dev->parent, ((struct device *)data)->parent);
 }
 
 static int mei_gsc_proxy_probe(struct mei_cl_device *cldev,
@@ -148,7 +146,7 @@ static int mei_gsc_proxy_probe(struct mei_cl_device *cldev,
 	}
 
 	component_match_add_typed(&cldev->dev, &master_match,
-				  mei_gsc_proxy_component_match, NULL);
+				  mei_gsc_proxy_component_match, cldev->dev.parent);
 	if (IS_ERR_OR_NULL(master_match)) {
 		ret = -ENOMEM;
 		goto err_exit;

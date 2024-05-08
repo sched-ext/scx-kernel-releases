@@ -307,11 +307,8 @@ static void xhci_pci_quirks(struct device *dev, struct xhci_hcd *xhci)
 		xhci->quirks |= XHCI_RESET_ON_RESUME;
 	}
 
-	if (pdev->vendor == PCI_VENDOR_ID_AMD) {
+	if (pdev->vendor == PCI_VENDOR_ID_AMD)
 		xhci->quirks |= XHCI_TRUST_TX_LENGTH;
-		if (pdev->device == 0x43f7)
-			xhci->quirks |= XHCI_DEFAULT_PM_RUNTIME_ALLOW;
-	}
 
 	if ((pdev->vendor == PCI_VENDOR_ID_AMD) &&
 		((pdev->device == PCI_DEVICE_ID_AMD_PROMONTORYA_4) ||
@@ -823,6 +820,7 @@ static int xhci_pci_poweroff_late(struct usb_hcd *hcd, bool do_wakeup)
 	struct xhci_hcd		*xhci = hcd_to_xhci(hcd);
 	struct xhci_port	*port;
 	struct usb_device	*udev;
+	unsigned int		slot_id;
 	u32			portsc;
 	int			i;
 
@@ -845,14 +843,15 @@ static int xhci_pci_poweroff_late(struct usb_hcd *hcd, bool do_wakeup)
 		if ((portsc & PORT_PLS_MASK) != XDEV_U3)
 			continue;
 
-		if (!port->slot_id || !xhci->devs[port->slot_id]) {
+		slot_id = xhci_find_slot_id_by_port(port->rhub->hcd, xhci,
+						    port->hcd_portnum + 1);
+		if (!slot_id || !xhci->devs[slot_id]) {
 			xhci_err(xhci, "No dev for slot_id %d for port %d-%d in U3\n",
-				 port->slot_id, port->rhub->hcd->self.busnum,
-				 port->hcd_portnum + 1);
+				 slot_id, port->rhub->hcd->self.busnum, port->hcd_portnum + 1);
 			continue;
 		}
 
-		udev = xhci->devs[port->slot_id]->udev;
+		udev = xhci->devs[slot_id]->udev;
 
 		/* if wakeup is enabled then don't disable the port */
 		if (udev->do_remote_wakeup && do_wakeup)

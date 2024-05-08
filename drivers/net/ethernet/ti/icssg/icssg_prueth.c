@@ -421,14 +421,12 @@ static int prueth_init_rx_chns(struct prueth_emac *emac,
 		if (!i)
 			fdqring_id = k3_udma_glue_rx_flow_get_fdq_id(rx_chn->rx_chn,
 								     i);
-		ret = k3_udma_glue_rx_get_irq(rx_chn->rx_chn, i);
-		if (ret <= 0) {
-			if (!ret)
-				ret = -ENXIO;
+		rx_chn->irq[i] = k3_udma_glue_rx_get_irq(rx_chn->rx_chn, i);
+		if (rx_chn->irq[i] <= 0) {
+			ret = rx_chn->irq[i];
 			netdev_err(ndev, "Failed to get rx dma irq");
 			goto fail;
 		}
-		rx_chn->irq[i] = ret;
 	}
 
 	return 0;
@@ -1491,6 +1489,9 @@ static int emac_ndo_stop(struct net_device *ndev)
 	/* Destroying the queued work in ndo_stop() */
 	cancel_delayed_work_sync(&emac->stats_work);
 
+	/* stop PRUs */
+	prueth_emac_stop(emac);
+
 	if (prueth->emacs_initialized == 1)
 		icss_iep_exit(emac->iep);
 
@@ -1501,6 +1502,7 @@ static int emac_ndo_stop(struct net_device *ndev)
 
 	free_irq(emac->rx_chns.irq[rx_flow], emac);
 	prueth_ndev_del_tx_napi(emac, emac->tx_ch_num);
+	prueth_cleanup_tx_chns(emac);
 
 	prueth_cleanup_rx_chns(emac, &emac->rx_chns, max_rx_flows);
 	prueth_cleanup_tx_chns(emac);

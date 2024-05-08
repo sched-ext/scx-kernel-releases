@@ -84,8 +84,7 @@ static inline struct drm_i915_private *kdev_to_i915(struct device *kdev)
 #define IS_ROCKETLAKE(dev_priv)	IS_PLATFORM(dev_priv, XE_ROCKETLAKE)
 #define IS_DG1(dev_priv)        IS_PLATFORM(dev_priv, XE_DG1)
 #define IS_ALDERLAKE_S(dev_priv) IS_PLATFORM(dev_priv, XE_ALDERLAKE_S)
-#define IS_ALDERLAKE_P(dev_priv) (IS_PLATFORM(dev_priv, XE_ALDERLAKE_P) || \
-				  IS_PLATFORM(dev_priv, XE_ALDERLAKE_N))
+#define IS_ALDERLAKE_P(dev_priv) IS_PLATFORM(dev_priv, XE_ALDERLAKE_P)
 #define IS_XEHPSDV(dev_priv) (dev_priv && 0)
 #define IS_DG2(dev_priv)	IS_PLATFORM(dev_priv, XE_DG2)
 #define IS_PONTEVECCHIO(dev_priv) IS_PLATFORM(dev_priv, XE_PVC)
@@ -163,18 +162,18 @@ static inline struct drm_i915_private *kdev_to_i915(struct device *kdev)
 
 #include "intel_wakeref.h"
 
-static inline intel_wakeref_t intel_runtime_pm_get(struct xe_runtime_pm *pm)
+static inline bool intel_runtime_pm_get(struct xe_runtime_pm *pm)
 {
 	struct xe_device *xe = container_of(pm, struct xe_device, runtime_pm);
 
 	if (xe_pm_runtime_get(xe) < 0) {
 		xe_pm_runtime_put(xe);
-		return 0;
+		return false;
 	}
-	return 1;
+	return true;
 }
 
-static inline intel_wakeref_t intel_runtime_pm_get_if_in_use(struct xe_runtime_pm *pm)
+static inline bool intel_runtime_pm_get_if_in_use(struct xe_runtime_pm *pm)
 {
 	struct xe_device *xe = container_of(pm, struct xe_device, runtime_pm);
 
@@ -188,7 +187,7 @@ static inline void intel_runtime_pm_put_unchecked(struct xe_runtime_pm *pm)
 	xe_pm_runtime_put(xe);
 }
 
-static inline void intel_runtime_pm_put(struct xe_runtime_pm *pm, intel_wakeref_t wakeref)
+static inline void intel_runtime_pm_put(struct xe_runtime_pm *pm, bool wakeref)
 {
 	if (wakeref)
 		intel_runtime_pm_put_unchecked(pm);

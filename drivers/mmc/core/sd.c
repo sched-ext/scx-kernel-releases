@@ -805,7 +805,7 @@ static const struct attribute_group sd_std_group = {
 };
 __ATTRIBUTE_GROUPS(sd_std);
 
-const struct device_type sd_type = {
+struct device_type sd_type = {
 	.groups = sd_std_groups,
 };
 

@@ -950,15 +950,15 @@ qca8k_mdio_register(struct qca8k_priv *priv)
 	struct device *dev = ds->dev;
 	struct device_node *mdio;
 	struct mii_bus *bus;
-	int ret = 0;
+	int err = 0;
 
 	mdio = of_get_child_by_name(dev->of_node, "mdio");
 	if (mdio && !of_device_is_available(mdio))
-		goto out_put_node;
+		goto out;
 
 	bus = devm_mdiobus_alloc(dev);
 	if (!bus) {
-		ret = -ENOMEM;
+		err = -ENOMEM;
 		goto out_put_node;
 	}
 
@@ -984,11 +984,12 @@ qca8k_mdio_register(struct qca8k_priv *priv)
 		bus->write = qca8k_legacy_mdio_write;
 	}
 
-	ret = devm_of_mdiobus_register(dev, bus, mdio);
+	err = devm_of_mdiobus_register(dev, bus, mdio);
 
 out_put_node:
 	of_node_put(mdio);
-	return ret;
+out:
+	return err;
 }
 
 static int
@@ -997,7 +998,7 @@ qca8k_setup_mdio_bus(struct qca8k_priv *priv)
 	u32 internal_mdio_mask = 0, external_mdio_mask = 0, reg;
 	struct device_node *ports, *port;
 	phy_interface_t mode;
-	int ret;
+	int err;
 
 	ports = of_get_child_by_name(priv->dev->of_node, "ports");
 	if (!ports)
@@ -1007,11 +1008,11 @@ qca8k_setup_mdio_bus(struct qca8k_priv *priv)
 		return -EINVAL;
 
 	for_each_available_child_of_node(ports, port) {
-		ret = of_property_read_u32(port, "reg", &reg);
-		if (ret) {
+		err = of_property_read_u32(port, "reg", &reg);
+		if (err) {
 			of_node_put(port);
 			of_node_put(ports);
-			return ret;
+			return err;
 		}
 
 		if (!dsa_is_user_port(priv->ds, reg))
@@ -2050,11 +2051,12 @@ qca8k_sw_probe(struct mdio_device *mdiodev)
 	priv->info = of_device_get_match_data(priv->dev);
 
 	priv->reset_gpio = devm_gpiod_get_optional(priv->dev, "reset",
-						   GPIOD_OUT_HIGH);
+						   GPIOD_ASIS);
 	if (IS_ERR(priv->reset_gpio))
 		return PTR_ERR(priv->reset_gpio);
 
 	if (priv->reset_gpio) {
+		gpiod_set_value_cansleep(priv->reset_gpio, 1);
 		/* The active low duration must be greater than 10 ms
 		 * and checkpatch.pl wants 20 ms.
 		 */

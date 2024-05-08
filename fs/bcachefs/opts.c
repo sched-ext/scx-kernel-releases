@@ -7,7 +7,6 @@
 #include "disk_groups.h"
 #include "error.h"
 #include "opts.h"
-#include "recovery_passes.h"
 #include "super-io.h"
 #include "util.h"
 
@@ -43,7 +42,7 @@ const char * const __bch2_btree_ids[] = {
 	NULL
 };
 
-static const char * const __bch2_csum_types[] = {
+const char * const bch2_csum_types[] = {
 	BCH_CSUM_TYPES()
 	NULL
 };
@@ -53,7 +52,7 @@ const char * const bch2_csum_opts[] = {
 	NULL
 };
 
-static const char * const __bch2_compression_types[] = {
+const char * const __bch2_compression_types[] = {
 	BCH_COMPRESSION_TYPES()
 	NULL
 };
@@ -83,38 +82,17 @@ const char * const bch2_member_states[] = {
 	NULL
 };
 
-static const char * const __bch2_jset_entry_types[] = {
+const char * const bch2_jset_entry_types[] = {
 	BCH_JSET_ENTRY_TYPES()
 	NULL
 };
 
-static const char * const __bch2_fs_usage_types[] = {
+const char * const bch2_fs_usage_types[] = {
 	BCH_FS_USAGE_TYPES()
 	NULL
 };
 
 #undef x
-
-static void prt_str_opt_boundscheck(struct printbuf *out, const char * const opts[],
-				    unsigned nr, const char *type, unsigned idx)
-{
-	if (idx < nr)
-		prt_str(out, opts[idx]);
-	else
-		prt_printf(out, "(unknown %s %u)", type, idx);
-}
-
-#define PRT_STR_OPT_BOUNDSCHECKED(name, type)					\
-void bch2_prt_##name(struct printbuf *out, type t)				\
-{										\
-	prt_str_opt_boundscheck(out, __bch2_##name##s, ARRAY_SIZE(__bch2_##name##s) - 1, #name, t);\
-}
-
-PRT_STR_OPT_BOUNDSCHECKED(jset_entry_type,	enum bch_jset_entry_type);
-PRT_STR_OPT_BOUNDSCHECKED(fs_usage_type,	enum bch_fs_usage_type);
-PRT_STR_OPT_BOUNDSCHECKED(data_type,		enum bch_data_type);
-PRT_STR_OPT_BOUNDSCHECKED(csum_type,		enum bch_csum_type);
-PRT_STR_OPT_BOUNDSCHECKED(compression_type,	enum bch_compression_type);
 
 static int bch2_opt_fix_errors_parse(struct bch_fs *c, const char *val, u64 *res,
 				     struct printbuf *err)
@@ -227,9 +205,6 @@ const struct bch_option bch2_opt_table[] = {
 #define OPT_STR(_choices)	.type = BCH_OPT_STR,			\
 				.min = 0, .max = ARRAY_SIZE(_choices),	\
 				.choices = _choices
-#define OPT_STR_NOLIMIT(_choices)	.type = BCH_OPT_STR,		\
-				.min = 0, .max = U64_MAX,		\
-				.choices = _choices
 #define OPT_FN(_fn)		.type = BCH_OPT_FN, .fn	= _fn
 
 #define x(_name, _bits, _flags, _type, _sb_opt, _default, _hint, _help)	\
@@ -339,7 +314,7 @@ int bch2_opt_parse(struct bch_fs *c,
 		if (ret < 0 || (*res != 0 && *res != 1)) {
 			if (err)
 				prt_printf(err, "%s: must be bool", opt->attr.name);
-			return ret < 0 ? ret : -BCH_ERR_option_not_bool;
+			return ret;
 		}
 		break;
 	case BCH_OPT_UINT:
@@ -481,7 +456,7 @@ int bch2_parse_mount_opts(struct bch_fs *c, struct bch_opts *opts,
 
 	copied_opts = kstrdup(options, GFP_KERNEL);
 	if (!copied_opts)
-		return -ENOMEM;
+		return -1;
 	copied_opts_start = copied_opts;
 
 	while ((opt = strsep(&copied_opts, ",")) != NULL) {
@@ -526,11 +501,11 @@ int bch2_parse_mount_opts(struct bch_fs *c, struct bch_opts *opts,
 
 bad_opt:
 	pr_err("Bad mount option %s", name);
-	ret = -BCH_ERR_option_name;
+	ret = -1;
 	goto out;
 bad_val:
 	pr_err("Invalid mount option %s", err.buf);
-	ret = -BCH_ERR_option_value;
+	ret = -1;
 	goto out;
 out:
 	kfree(copied_opts_start);

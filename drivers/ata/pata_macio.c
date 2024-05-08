@@ -1188,7 +1188,7 @@ static int pata_macio_attach(struct macio_dev *mdev,
 	return rc;
 }
 
-static void pata_macio_detach(struct macio_dev *mdev)
+static int pata_macio_detach(struct macio_dev *mdev)
 {
 	struct ata_host *host = macio_get_drvdata(mdev);
 	struct pata_macio_priv *priv = host->private_data;
@@ -1203,6 +1203,8 @@ static void pata_macio_detach(struct macio_dev *mdev)
 	ata_host_detach(host);
 
 	unlock_media_bay(priv->mdev->media_bay);
+
+	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -1371,6 +1373,9 @@ static struct pci_driver pata_macio_pci_driver = {
 	.suspend	= pata_macio_pci_suspend,
 	.resume		= pata_macio_pci_resume,
 #endif
+	.driver = {
+		.owner		= THIS_MODULE,
+	},
 };
 MODULE_DEVICE_TABLE(pci, pata_macio_pci_match);
 

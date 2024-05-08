@@ -38,12 +38,6 @@
 		serial2 = &uart2;
 		serial3 = &uart3;
 		serial4 = &uart4;
-		spi0 = &spi0;
-		spi1 = &spi1;
-		spi2 = &spi2;
-		spi3 = &spi3;
-		spi4 = &spi4;
-		spi5 = &spi5;
 	};
 
 	cpus {
@@ -51,7 +45,7 @@
 		#size-cells = <0>;
 
 		cpu-map {
-			cluster0 {	/* Cortex-A53 */
+			cluster0 {
 				core0 {
 					cpu = <&cpu_l0>;
 				};
@@ -66,7 +60,7 @@
 				};
 			};
 
-			cluster1 {	/* Cortex-A72 */
+			cluster1 {
 				core0 {
 					cpu = <&cpu_b0>;
 				};
@@ -86,13 +80,6 @@
 			#cooling-cells = <2>; /* min followed by max */
 			dynamic-power-coefficient = <100>;
 			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
-			i-cache-size = <0x8000>;
-			i-cache-line-size = <64>;
-			i-cache-sets = <256>;
-			d-cache-size = <0x8000>;
-			d-cache-line-size = <64>;
-			d-cache-sets = <128>;
-			next-level-cache = <&l2_cache_l>;
 		};
 
 		cpu_l1: cpu@1 {
@@ -105,13 +92,6 @@
 			#cooling-cells = <2>; /* min followed by max */
 			dynamic-power-coefficient = <100>;
 			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
-			i-cache-size = <0x8000>;
-			i-cache-line-size = <64>;
-			i-cache-sets = <256>;
-			d-cache-size = <0x8000>;
-			d-cache-line-size = <64>;
-			d-cache-sets = <128>;
-			next-level-cache = <&l2_cache_l>;
 		};
 
 		cpu_l2: cpu@2 {
@@ -124,13 +104,6 @@
 			#cooling-cells = <2>; /* min followed by max */
 			dynamic-power-coefficient = <100>;
 			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
-			i-cache-size = <0x8000>;
-			i-cache-line-size = <64>;
-			i-cache-sets = <256>;
-			d-cache-size = <0x8000>;
-			d-cache-line-size = <64>;
-			d-cache-sets = <128>;
-			next-level-cache = <&l2_cache_l>;
 		};
 
 		cpu_l3: cpu@3 {
@@ -143,13 +116,6 @@
 			#cooling-cells = <2>; /* min followed by max */
 			dynamic-power-coefficient = <100>;
 			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
-			i-cache-size = <0x8000>;
-			i-cache-line-size = <64>;
-			i-cache-sets = <256>;
-			d-cache-size = <0x8000>;
-			d-cache-line-size = <64>;
-			d-cache-sets = <128>;
-			next-level-cache = <&l2_cache_l>;
 		};
 
 		cpu_b0: cpu@100 {
@@ -162,13 +128,6 @@
 			#cooling-cells = <2>; /* min followed by max */
 			dynamic-power-coefficient = <436>;
 			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
-			i-cache-size = <0xC000>;
-			i-cache-line-size = <64>;
-			i-cache-sets = <256>;
-			d-cache-size = <0x8000>;
-			d-cache-line-size = <64>;
-			d-cache-sets = <256>;
-			next-level-cache = <&l2_cache_b>;
 
 			thermal-idle {
 				#cooling-cells = <2>;
@@ -187,37 +146,12 @@
 			#cooling-cells = <2>; /* min followed by max */
 			dynamic-power-coefficient = <436>;
 			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
-			i-cache-size = <0xC000>;
-			i-cache-line-size = <64>;
-			i-cache-sets = <256>;
-			d-cache-size = <0x8000>;
-			d-cache-line-size = <64>;
-			d-cache-sets = <256>;
-			next-level-cache = <&l2_cache_b>;
 
 			thermal-idle {
 				#cooling-cells = <2>;
 				duration-us = <10000>;
 				exit-latency-us = <500>;
 			};
-		};
-
-		l2_cache_l: l2-cache-cluster0 {
-			compatible = "cache";
-			cache-level = <2>;
-			cache-unified;
-			cache-size = <0x80000>;
-			cache-line-size = <64>;
-			cache-sets = <512>;
-		};
-
-		l2_cache_b: l2-cache-cluster1 {
-			compatible = "cache";
-			cache-level = <2>;
-			cache-unified;
-			cache-size = <0x100000>;
-			cache-line-size = <64>;
-			cache-sets = <1024>;
 		};
 
 		idle-states {
@@ -2022,7 +1956,6 @@
 	hdmi: hdmi@ff940000 {
 		compatible = "rockchip,rk3399-dw-hdmi";
 		reg = <0x0 0xff940000 0x0 0x20000>;
-		reg-io-width = <4>;
 		interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH 0>;
 		clocks = <&cru PCLK_HDMI_CTRL>,
 			 <&cru SCLK_HDMI_SFR>,
@@ -2031,16 +1964,13 @@
 			 <&cru PLL_VPLL>;
 		clock-names = "iahb", "isfr", "cec", "grf", "ref";
 		power-domains = <&power RK3399_PD_HDCP>;
+		reg-io-width = <4>;
 		rockchip,grf = <&grf>;
 		#sound-dai-cells = <0>;
 		status = "disabled";
 
 		ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			hdmi_in: port@0 {
-				reg = <0>;
+			hdmi_in: port {
 				#address-cells = <1>;
 				#size-cells = <0>;
 
@@ -2052,10 +1982,6 @@
 					reg = <1>;
 					remote-endpoint = <&vopl_out_hdmi>;
 				};
-			};
-
-			hdmi_out: port@1 {
-				reg = <1>;
 			};
 		};
 	};

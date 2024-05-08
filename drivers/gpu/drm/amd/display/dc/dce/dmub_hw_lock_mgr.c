@@ -65,9 +65,5 @@ bool should_use_dmub_lock(struct dc_link *link)
 {
 	if (link->psr_settings.psr_version == DC_PSR_VERSION_SU_1)
 		return true;
-
-	if (link->replay_settings.replay_feature_enabled)
-		return true;
-
 	return false;
 }

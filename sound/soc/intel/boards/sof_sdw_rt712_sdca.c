@@ -13,7 +13,6 @@
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include <sound/soc-dapm.h>
-#include "sof_board_helpers.h"
 #include "sof_sdw_common.h"
 
 static const struct snd_soc_dapm_widget rt712_spk_widgets[] = {
@@ -35,7 +34,7 @@ static const struct snd_kcontrol_new rt712_spk_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Speaker"),
 };
 
-int rt712_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
+static int rt712_spk_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
 	int ret;
@@ -67,21 +66,23 @@ int rt712_spk_rtd_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
-static const char * const dmics[] = {
-	"rt712-sdca-dmic"
-};
+int sof_sdw_rt712_spk_init(struct snd_soc_card *card,
+			   const struct snd_soc_acpi_link_adr *link,
+			   struct snd_soc_dai_link *dai_links,
+			   struct sof_sdw_codec_info *info,
+			   bool playback)
+{
+	dai_links->init = rt712_spk_init;
 
-int rt712_sdca_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
+	return 0;
+}
+
+static int rt712_sdca_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
-	struct snd_soc_dai *codec_dai;
-	struct snd_soc_component *component;
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_component *component = codec_dai->component;
 
-	codec_dai = get_codec_dai_by_name(rtd, dmics, ARRAY_SIZE(dmics));
-	if (!codec_dai)
-		return -EINVAL;
-
-	component = codec_dai->component;
 	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
 					  "%s mic:%s",
 					  card->components, component->name_prefix);
@@ -90,4 +91,14 @@ int rt712_sdca_dmic_rtd_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_BOARD_HELPERS);
+
+int sof_sdw_rt712_sdca_dmic_init(struct snd_soc_card *card,
+				 const struct snd_soc_acpi_link_adr *link,
+				 struct snd_soc_dai_link *dai_links,
+				 struct sof_sdw_codec_info *info,
+				 bool playback)
+{
+	dai_links->init = rt712_sdca_dmic_rtd_init;
+
+	return 0;
+}

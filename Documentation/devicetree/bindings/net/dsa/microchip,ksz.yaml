@@ -31,7 +31,6 @@ properties:
       - microchip,ksz9893
       - microchip,ksz9563
       - microchip,ksz8563
-      - microchip,ksz8567
 
   reset-gpios:
     description:

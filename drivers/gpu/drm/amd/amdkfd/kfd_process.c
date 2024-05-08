@@ -819,9 +819,9 @@ struct kfd_process *kfd_create_process(struct task_struct *thread)
 	mutex_lock(&kfd_processes_mutex);
 
 	if (kfd_is_locked()) {
+		mutex_unlock(&kfd_processes_mutex);
 		pr_debug("KFD is locked! Cannot create process");
-		process = ERR_PTR(-EINVAL);
-		goto out;
+		return ERR_PTR(-EINVAL);
 	}
 
 	/* A prior open of /dev/kfd could have already created the process. */
@@ -829,14 +829,6 @@ struct kfd_process *kfd_create_process(struct task_struct *thread)
 	if (process) {
 		pr_debug("Process already found\n");
 	} else {
-		/* If the process just called exec(3), it is possible that the
-		 * cleanup of the kfd_process (following the release of the mm
-		 * of the old process image) is still in the cleanup work queue.
-		 * Make sure to drain any job before trying to recreate any
-		 * resource for this process.
-		 */
-		flush_workqueue(kfd_process_wq);
-
 		process = create_process(thread);
 		if (IS_ERR(process))
 			goto out;
@@ -1930,8 +1922,6 @@ static int signal_eviction_fence(struct kfd_process *p)
 	rcu_read_lock();
 	ef = dma_fence_get_rcu_safe(&p->ef);
 	rcu_read_unlock();
-	if (!ef)
-		return -EINVAL;
 
 	ret = dma_fence_signal(ef);
 	dma_fence_put(ef);
@@ -1959,9 +1949,10 @@ static void evict_process_worker(struct work_struct *work)
 		 * they are responsible stopping the queues and scheduling
 		 * the restore work.
 		 */
-		if (signal_eviction_fence(p) ||
-		    mod_delayed_work(kfd_restore_wq, &p->restore_work,
-				     msecs_to_jiffies(PROCESS_RESTORE_TIME_MS)))
+		if (!signal_eviction_fence(p))
+			queue_delayed_work(kfd_restore_wq, &p->restore_work,
+				msecs_to_jiffies(PROCESS_RESTORE_TIME_MS));
+		else
 			kfd_process_restore_queues(p);
 
 		pr_debug("Finished evicting pasid 0x%x\n", p->pasid);
@@ -2020,9 +2011,9 @@ static void restore_process_worker(struct work_struct *work)
 	if (ret) {
 		pr_debug("Failed to restore BOs of pasid 0x%x, retry after %d ms\n",
 			 p->pasid, PROCESS_BACK_OFF_TIME_MS);
-		if (mod_delayed_work(kfd_restore_wq, &p->restore_work,
-				     msecs_to_jiffies(PROCESS_RESTORE_TIME_MS)))
-			kfd_process_restore_queues(p);
+		ret = queue_delayed_work(kfd_restore_wq, &p->restore_work,
+				msecs_to_jiffies(PROCESS_BACK_OFF_TIME_MS));
+		WARN(!ret, "reschedule restore work failed\n");
 	}
 }
 

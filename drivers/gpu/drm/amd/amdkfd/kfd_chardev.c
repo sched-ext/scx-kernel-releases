@@ -63,10 +63,8 @@ static const struct file_operations kfd_fops = {
 };
 
 static int kfd_char_dev_major = -1;
+static struct class *kfd_class;
 struct device *kfd_device;
-static const struct class kfd_class = {
-	.name = kfd_dev_name,
-};
 
 static inline struct kfd_process_device *kfd_lock_pdd_by_id(struct kfd_process *p, __u32 gpu_id)
 {
@@ -96,13 +94,14 @@ int kfd_chardev_init(void)
 	if (err < 0)
 		goto err_register_chrdev;
 
-	err = class_register(&kfd_class);
-	if (err)
+	kfd_class = class_create(kfd_dev_name);
+	err = PTR_ERR(kfd_class);
+	if (IS_ERR(kfd_class))
 		goto err_class_create;
 
-	kfd_device = device_create(&kfd_class, NULL,
-				   MKDEV(kfd_char_dev_major, 0),
-				   NULL, kfd_dev_name);
+	kfd_device = device_create(kfd_class, NULL,
+					MKDEV(kfd_char_dev_major, 0),
+					NULL, kfd_dev_name);
 	err = PTR_ERR(kfd_device);
 	if (IS_ERR(kfd_device))
 		goto err_device_create;
@@ -110,7 +109,7 @@ int kfd_chardev_init(void)
 	return 0;
 
 err_device_create:
-	class_unregister(&kfd_class);
+	class_destroy(kfd_class);
 err_class_create:
 	unregister_chrdev(kfd_char_dev_major, kfd_dev_name);
 err_register_chrdev:
@@ -119,8 +118,8 @@ err_register_chrdev:
 
 void kfd_chardev_exit(void)
 {
-	device_destroy(&kfd_class, MKDEV(kfd_char_dev_major, 0));
-	class_unregister(&kfd_class);
+	device_destroy(kfd_class, MKDEV(kfd_char_dev_major, 0));
+	class_destroy(kfd_class);
 	unregister_chrdev(kfd_char_dev_major, kfd_dev_name);
 	kfd_device = NULL;
 }
@@ -372,7 +371,7 @@ static int kfd_ioctl_create_queue(struct file *filep, struct kfd_process *p,
 			goto err_wptr_map_gart;
 		}
 
-		err = amdgpu_amdkfd_map_gtt_bo_to_gart(wptr_bo);
+		err = amdgpu_amdkfd_map_gtt_bo_to_gart(dev->adev, wptr_bo);
 		if (err) {
 			pr_err("Failed to map wptr bo to GART\n");
 			goto err_wptr_map_gart;
@@ -779,8 +778,8 @@ static int kfd_ioctl_get_process_apertures_new(struct file *filp,
 	 * nodes, but not more than args->num_of_nodes as that is
 	 * the amount of memory allocated by user
 	 */
-	pa = kcalloc(args->num_of_nodes, sizeof(struct kfd_process_device_apertures),
-		     GFP_KERNEL);
+	pa = kzalloc((sizeof(struct kfd_process_device_apertures) *
+				args->num_of_nodes), GFP_KERNEL);
 	if (!pa)
 		return -ENOMEM;
 
@@ -1443,9 +1442,7 @@ static int kfd_ioctl_unmap_memory_from_gpu(struct file *filep,
 			kfd_flush_tlb(peer_pdd, TLB_FLUSH_HEAVYWEIGHT);
 
 		/* Remove dma mapping after tlb flush to avoid IO_PAGE_FAULT */
-		err = amdgpu_amdkfd_gpuvm_dmaunmap_mem(mem, peer_pdd->drm_priv);
-		if (err)
-			goto sync_memory_failed;
+		amdgpu_amdkfd_gpuvm_dmaunmap_mem(mem, peer_pdd->drm_priv);
 	}
 
 	mutex_unlock(&p->mutex);
@@ -1523,7 +1520,7 @@ static int kfd_ioctl_get_dmabuf_info(struct file *filep,
 
 	/* Find a KFD GPU device that supports the get_dmabuf_info query */
 	for (i = 0; kfd_topology_enum_kfd_devices(i, &dev) == 0; i++)
-		if (dev && !kfd_devcgroup_check_permission(dev))
+		if (dev)
 			break;
 	if (!dev)
 		return -EINVAL;
@@ -1545,7 +1542,7 @@ static int kfd_ioctl_get_dmabuf_info(struct file *filep,
 	if (xcp_id >= 0)
 		args->gpu_id = dmabuf_adev->kfd.dev->nodes[xcp_id]->id;
 	else
-		args->gpu_id = dev->id;
+		args->gpu_id = dmabuf_adev->kfd.dev->nodes[0]->id;
 	args->flags = flags;
 
 	/* Copy metadata buffer to user mode */
@@ -2936,7 +2933,6 @@ static int kfd_ioctl_set_debug_trap(struct file *filep, struct kfd_process *p, v
 	if (IS_ERR_OR_NULL(target)) {
 		pr_debug("Cannot find process PID %i to debug\n", args->pid);
 		r = target ? PTR_ERR(target) : -ESRCH;
-		target = NULL;
 		goto out;
 	}
 

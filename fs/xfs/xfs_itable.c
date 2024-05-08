@@ -197,8 +197,8 @@ xfs_bulkstat_one(
 
 	ASSERT(breq->icount == 1);
 
-	bc.buf = kzalloc(sizeof(struct xfs_bulkstat),
-			GFP_KERNEL | __GFP_RETRY_MAYFAIL);
+	bc.buf = kmem_zalloc(sizeof(struct xfs_bulkstat),
+			KM_MAYFAIL);
 	if (!bc.buf)
 		return -ENOMEM;
 
@@ -214,7 +214,7 @@ xfs_bulkstat_one(
 			breq->startino, &bc);
 	xfs_trans_cancel(tp);
 out:
-	kfree(bc.buf);
+	kmem_free(bc.buf);
 
 	/*
 	 * If we reported one inode to userspace then we abort because we hit
@@ -289,8 +289,8 @@ xfs_bulkstat(
 	if (xfs_bulkstat_already_done(breq->mp, breq->startino))
 		return 0;
 
-	bc.buf = kzalloc(sizeof(struct xfs_bulkstat),
-			GFP_KERNEL | __GFP_RETRY_MAYFAIL);
+	bc.buf = kmem_zalloc(sizeof(struct xfs_bulkstat),
+			KM_MAYFAIL);
 	if (!bc.buf)
 		return -ENOMEM;
 
@@ -309,7 +309,7 @@ xfs_bulkstat(
 			xfs_bulkstat_iwalk, breq->icount, &bc);
 	xfs_trans_cancel(tp);
 out:
-	kfree(bc.buf);
+	kmem_free(bc.buf);
 
 	/*
 	 * We found some inodes, so clear the error status and return them.

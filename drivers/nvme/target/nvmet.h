@@ -58,7 +58,7 @@
 
 struct nvmet_ns {
 	struct percpu_ref	ref;
-	struct file		*bdev_file;
+	struct bdev_handle	*bdev_handle;
 	struct block_device	*bdev;
 	struct file		*file;
 	bool			readonly;
@@ -163,7 +163,6 @@ struct nvmet_port {
 	void				*priv;
 	bool				enabled;
 	int				inline_data_size;
-	int				max_queue_size;
 	const struct nvmet_fabrics_ops	*tr_ops;
 	bool				pi_enable;
 };
@@ -543,12 +542,10 @@ void nvmet_subsys_disc_changed(struct nvmet_subsys *subsys,
 		struct nvmet_host *host);
 void nvmet_add_async_event(struct nvmet_ctrl *ctrl, u8 event_type,
 		u8 event_info, u8 log_page);
-bool nvmet_subsys_nsid_exists(struct nvmet_subsys *subsys, u32 nsid);
 
-#define NVMET_MIN_QUEUE_SIZE	16
-#define NVMET_MAX_QUEUE_SIZE	1024
+#define NVMET_QUEUE_SIZE	1024
 #define NVMET_NR_QUEUES		128
-#define NVMET_MAX_CMD(ctrl)	(NVME_CAP_MQES(ctrl->cap) + 1)
+#define NVMET_MAX_CMD		NVMET_QUEUE_SIZE
 
 /*
  * Nice round number that makes a list of nsids fit into a page.

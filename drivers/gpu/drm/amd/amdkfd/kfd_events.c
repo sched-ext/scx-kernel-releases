@@ -1285,10 +1285,8 @@ void kfd_signal_poison_consumed_event(struct kfd_node *dev, u32 pasid)
 	uint32_t id = KFD_FIRST_NONSIGNAL_EVENT_ID;
 	int user_gpu_id;
 
-	if (!p) {
-		dev_warn(dev->adev->dev, "Not find process with pasid:%d\n", pasid);
+	if (!p)
 		return; /* Presumably process exited. */
-	}
 
 	user_gpu_id = kfd_process_get_user_gpu_id(p, dev->id);
 	if (unlikely(user_gpu_id == -EINVAL)) {
@@ -1324,8 +1322,6 @@ void kfd_signal_poison_consumed_event(struct kfd_node *dev, u32 pasid)
 		}
 	}
 
-	dev_warn(dev->adev->dev, "Send SIGBUS to process %s(pasid:%d)\n",
-		p->lead_thread->comm, pasid);
 	rcu_read_unlock();
 
 	/* user application will handle SIGBUS signal */

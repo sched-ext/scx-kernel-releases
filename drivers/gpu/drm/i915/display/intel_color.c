@@ -2111,8 +2111,7 @@ static u32 intel_degamma_lut_size(const struct intel_crtc_state *crtc_state)
 	return DISPLAY_INFO(i915)->color.degamma_lut_size;
 }
 
-static int check_lut_size(struct drm_i915_private *i915,
-			  const struct drm_property_blob *lut, int expected)
+static int check_lut_size(const struct drm_property_blob *lut, int expected)
 {
 	int len;
 
@@ -2121,8 +2120,8 @@ static int check_lut_size(struct drm_i915_private *i915,
 
 	len = drm_color_lut_size(lut);
 	if (len != expected) {
-		drm_dbg_kms(&i915->drm, "Invalid LUT size; got %d, expected %d\n",
-			    len, expected);
+		DRM_DEBUG_KMS("Invalid LUT size; got %d, expected %d\n",
+			      len, expected);
 		return -EINVAL;
 	}
 
@@ -2147,8 +2146,8 @@ static int _check_luts(const struct intel_crtc_state *crtc_state,
 	degamma_length = intel_degamma_lut_size(crtc_state);
 	gamma_length = intel_gamma_lut_size(crtc_state);
 
-	if (check_lut_size(i915, degamma_lut, degamma_length) ||
-	    check_lut_size(i915, gamma_lut, gamma_length))
+	if (check_lut_size(degamma_lut, degamma_length) ||
+	    check_lut_size(gamma_lut, gamma_length))
 		return -EINVAL;
 
 	if (drm_color_lut_check(degamma_lut, degamma_tests) ||

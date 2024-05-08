@@ -47,17 +47,6 @@
 		regulator-boot-on;
 	};
 
-	hdmi-connnector {
-		compatible = "hdmi-connector";
-		type = "a";
-
-		port {
-			hdmi_connector_in: endpoint {
-				remote-endpoint = <&hdmi_connector_out>;
-			};
-		};
-	};
-
 	/*
 	 * This is a vbus-supply, which also supplies the GL852G usb hub,
 	 * thus has to be always-on
@@ -250,10 +239,6 @@
 	cpu-supply = <&vdd_arm>;
 };
 
-&display_subsystem {
-	status = "okay";
-};
-
 &emmc {
 	bus-width = <8>;
 	vmmc-supply = <&vcc_io>;
@@ -341,16 +326,6 @@
 &gpu {
 	mali-supply = <&vdd_log>;
 	status = "okay";
-};
-
-&hdmi {
-	status = "okay";
-};
-
-&hdmi_out {
-	hdmi_connector_out: endpoint {
-		remote-endpoint = <&hdmi_connector_in>;
-	};
 };
 
 &mdio {
@@ -446,9 +421,5 @@
 };
 
 &usb2phy_otg {
-	status = "okay";
-};
-
-&vop {
 	status = "okay";
 };

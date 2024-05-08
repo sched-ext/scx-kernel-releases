@@ -120,9 +120,7 @@ additionalProperties:
         slew-rate: true
         gpio-hog: true
         gpios: true
-        input: true
         input-enable: true
-        output-enable: true
         output-high: true
         output-low: true
         line-name: true

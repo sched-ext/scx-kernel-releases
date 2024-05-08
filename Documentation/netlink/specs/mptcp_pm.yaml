@@ -292,14 +292,13 @@ operations:
     -
       name: get-addr
       doc: Get endpoint information
-      attribute-set: attr
+      attribute-set: endpoint
       dont-validate: [ strict ]
       flags: [ uns-admin-perm ]
       do: &get-addr-attrs
         request:
           attributes:
            - addr
-           - token
         reply:
           attributes:
            - addr

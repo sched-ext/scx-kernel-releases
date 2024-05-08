@@ -367,12 +367,14 @@ run_test()
   local desc=$2
   local node_src=$3
   local node_dst=$4
-  local ip6_dst=$5
-  local trace_type=$6
-  local ioam_ns=$7
-  local type=$8
+  local ip6_src=$5
+  local ip6_dst=$6
+  local if_dst=$7
+  local trace_type=$8
+  local ioam_ns=$9
 
-  ip netns exec $node_dst ./ioam6_parser $name $trace_type $ioam_ns $type &
+  ip netns exec $node_dst ./ioam6_parser $if_dst $name $ip6_src $ip6_dst \
+         $trace_type $ioam_ns &
   local spid=$!
   sleep 0.1
 
@@ -487,7 +489,7 @@ out_undef_ns()
          trace prealloc type 0x800000 ns 0 size 4 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0x800000 0 $1
+         db01::2 db01::1 veth0 0x800000 0
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 }
@@ -507,7 +509,7 @@ out_no_room()
          trace prealloc type 0xc00000 ns 123 size 4 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0xc00000 123 $1
+         db01::2 db01::1 veth0 0xc00000 123
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 }
@@ -541,14 +543,14 @@ out_bits()
       if [ $cmd_res != 0 ]
       then
         npassed=$((npassed+1))
-        log_test_passed "$descr ($1 mode)"
+        log_test_passed "$descr"
       else
         nfailed=$((nfailed+1))
-        log_test_failed "$descr ($1 mode)"
+        log_test_failed "$descr"
       fi
     else
 	run_test "out_bit$i" "$descr ($1 mode)" $ioam_node_alpha \
-           $ioam_node_beta db01::1 ${bit2type[$i]} 123 $1
+           $ioam_node_beta db01::2 db01::1 veth0 ${bit2type[$i]} 123
     fi
   done
 
@@ -572,7 +574,7 @@ out_full_supp_trace()
          trace prealloc type 0xfff002 ns 123 size 100 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0xfff002 123 $1
+         db01::2 db01::1 veth0 0xfff002 123
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 }
@@ -602,7 +604,7 @@ in_undef_ns()
          trace prealloc type 0x800000 ns 0 size 4 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0x800000 0 $1
+         db01::2 db01::1 veth0 0x800000 0
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 }
@@ -622,7 +624,7 @@ in_no_room()
          trace prealloc type 0xc00000 ns 123 size 4 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0xc00000 123 $1
+         db01::2 db01::1 veth0 0xc00000 123
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 }
@@ -649,7 +651,7 @@ in_bits()
            dev veth0
 
     run_test "in_bit$i" "${desc/<n>/$i} ($1 mode)" $ioam_node_alpha \
-           $ioam_node_beta db01::1 ${bit2type[$i]} 123 $1
+           $ioam_node_beta db01::2 db01::1 veth0 ${bit2type[$i]} 123
   done
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
@@ -677,7 +679,7 @@ in_oflag()
          trace prealloc type 0xc00000 ns 123 size 4 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0xc00000 123 $1
+         db01::2 db01::1 veth0 0xc00000 123
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 
@@ -701,7 +703,7 @@ in_full_supp_trace()
          trace prealloc type 0xfff002 ns 123 size 80 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_beta \
-         db01::1 0xfff002 123 $1
+         db01::2 db01::1 veth0 0xfff002 123
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_beta link set ip6tnl0 down
 }
@@ -729,7 +731,7 @@ fwd_full_supp_trace()
          trace prealloc type 0xfff002 ns 123 size 244 via db01::1 dev veth0
 
   run_test ${FUNCNAME[0]} "${desc} ($1 mode)" $ioam_node_alpha $ioam_node_gamma \
-         db02::2 0xfff002 123 $1
+         db01::2 db02::2 veth0 0xfff002 123
 
   [ "$1" = "encap" ] && ip -netns $ioam_node_gamma link set ip6tnl0 down
 }

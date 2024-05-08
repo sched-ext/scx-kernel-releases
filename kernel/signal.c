@@ -47,7 +47,6 @@
 #include <linux/cgroup.h>
 #include <linux/audit.h>
 #include <linux/sysctl.h>
-#include <uapi/linux/pidfd.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -1437,8 +1436,7 @@ void lockdep_assert_task_sighand_held(struct task_struct *task)
 #endif
 
 /*
- * send signal info to all the members of a thread group or to the
- * individual thread if type == PIDTYPE_PID.
+ * send signal info to all the members of a group
  */
 int group_send_sig_info(int sig, struct kernel_siginfo *info,
 			struct task_struct *p, enum pid_type type)
@@ -1480,8 +1478,7 @@ int __kill_pgrp_info(int sig, struct kernel_siginfo *info, struct pid *pgrp)
 	return ret;
 }
 
-static int kill_pid_info_type(int sig, struct kernel_siginfo *info,
-				struct pid *pid, enum pid_type type)
+int kill_pid_info(int sig, struct kernel_siginfo *info, struct pid *pid)
 {
 	int error = -ESRCH;
 	struct task_struct *p;
@@ -1490,21 +1487,17 @@ static int kill_pid_info_type(int sig, struct kernel_siginfo *info,
 		rcu_read_lock();
 		p = pid_task(pid, PIDTYPE_PID);
 		if (p)
-			error = group_send_sig_info(sig, info, p, type);
+			error = group_send_sig_info(sig, info, p, PIDTYPE_TGID);
 		rcu_read_unlock();
 		if (likely(!p || error != -ESRCH))
 			return error;
+
 		/*
 		 * The task was unhashed in between, try again.  If it
 		 * is dead, pid_task() will return NULL, if we race with
 		 * de_thread() it will find the new leader.
 		 */
 	}
-}
-
-int kill_pid_info(int sig, struct kernel_siginfo *info, struct pid *pid)
-{
-	return kill_pid_info_type(sig, info, pid, PIDTYPE_TGID);
 }
 
 static int kill_proc_info(int sig, struct kernel_siginfo *info, pid_t pid)
@@ -1905,18 +1898,15 @@ int send_sig_fault_trapno(int sig, int code, void __user *addr, int trapno,
 	return send_sig_info(info.si_signo, &info, t);
 }
 
-static int kill_pgrp_info(int sig, struct kernel_siginfo *info, struct pid *pgrp)
-{
-	int ret;
-	read_lock(&tasklist_lock);
-	ret = __kill_pgrp_info(sig, info, pgrp);
-	read_unlock(&tasklist_lock);
-	return ret;
-}
-
 int kill_pgrp(struct pid *pid, int sig, int priv)
 {
-	return kill_pgrp_info(sig, __si_special(priv), pid);
+	int ret;
+
+	read_lock(&tasklist_lock);
+	ret = __kill_pgrp_info(sig, __si_special(priv), pid);
+	read_unlock(&tasklist_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL(kill_pgrp);
 
@@ -2029,14 +2019,13 @@ ret:
 	return ret;
 }
 
-void do_notify_pidfd(struct task_struct *task)
+static void do_notify_pidfd(struct task_struct *task)
 {
-	struct pid *pid = task_pid(task);
+	struct pid *pid;
 
 	WARN_ON(task->exit_state == 0);
-
-	__wake_up(&pid->wait_pidfd, TASK_NORMAL, 0,
-			poll_to_key(EPOLLIN | EPOLLRDNORM));
+	pid = task_pid(task);
+	wake_up_all(&pid->wait_pidfd);
 }
 
 /*
@@ -2061,12 +2050,9 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 
 	WARN_ON_ONCE(!tsk->ptrace &&
 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
-	/*
-	 * tsk is a group leader and has no threads, wake up the
-	 * non-PIDFD_THREAD waiters.
-	 */
-	if (thread_group_empty(tsk))
-		do_notify_pidfd(tsk);
+
+	/* Wake up all pidfd waiters */
+	do_notify_pidfd(tsk);
 
 	if (sig != SIGCHLD) {
 		/*
@@ -2741,15 +2727,12 @@ relock:
 		/* Has this task already been marked for death? */
 		if ((signal->flags & SIGNAL_GROUP_EXIT) ||
 		     signal->group_exec_task) {
-			signr = SIGKILL;
+			clear_siginfo(&ksig->info);
+			ksig->info.si_signo = signr = SIGKILL;
 			sigdelset(&current->pending.signal, SIGKILL);
 			trace_signal_deliver(SIGKILL, SEND_SIG_NOINFO,
-					     &sighand->action[SIGKILL-1]);
+				&sighand->action[SIGKILL - 1]);
 			recalc_sigpending();
-			/*
-			 * implies do_group_exit() or return to PF_USER_WORKER,
-			 * no need to initialize ksig->info/etc.
-			 */
 			goto fatal;
 		}
 
@@ -2859,7 +2842,7 @@ relock:
 				spin_lock_irq(&sighand->siglock);
 			}
 
-			if (likely(do_signal_stop(signr))) {
+			if (likely(do_signal_stop(ksig->info.si_signo))) {
 				/* It released the siglock.  */
 				goto relock;
 			}
@@ -2883,7 +2866,7 @@ relock:
 
 		if (sig_kernel_coredump(signr)) {
 			if (print_fatal_signals)
-				print_fatal_signal(signr);
+				print_fatal_signal(ksig->info.si_signo);
 			proc_coredump_connector(current);
 			/*
 			 * If it was able to dump core, this kills all
@@ -2898,9 +2881,8 @@ relock:
 
 		/*
 		 * PF_USER_WORKER threads will catch and exit on fatal signals
-		 * themselves. They have cleanup that must be performed, so we
-		 * cannot call do_exit() on their behalf. Note that ksig won't
-		 * be properly initialized, PF_USER_WORKER's shouldn't use it.
+		 * themselves. They have cleanup that must be performed, so
+		 * we cannot call do_exit() on their behalf.
 		 */
 		if (current->flags & PF_USER_WORKER)
 			goto out;
@@ -2908,17 +2890,17 @@ relock:
 		/*
 		 * Death signals, no core dump.
 		 */
-		do_group_exit(signr);
+		do_group_exit(ksig->info.si_signo);
 		/* NOTREACHED */
 	}
 	spin_unlock_irq(&sighand->siglock);
-
+out:
 	ksig->sig = signr;
 
-	if (signr && !(ksig->ka.sa.sa_flags & SA_EXPOSE_TAGBITS))
+	if (!(ksig->ka.sa.sa_flags & SA_EXPOSE_TAGBITS))
 		hide_si_addr_tag_bits(ksig);
-out:
-	return signr > 0;
+
+	return ksig->sig > 0;
 }
 
 /**
@@ -3807,13 +3789,12 @@ COMPAT_SYSCALL_DEFINE4(rt_sigtimedwait_time32, compat_sigset_t __user *, uthese,
 #endif
 #endif
 
-static void prepare_kill_siginfo(int sig, struct kernel_siginfo *info,
-				 enum pid_type type)
+static inline void prepare_kill_siginfo(int sig, struct kernel_siginfo *info)
 {
 	clear_siginfo(info);
 	info->si_signo = sig;
 	info->si_errno = 0;
-	info->si_code = (type == PIDTYPE_PID) ? SI_TKILL : SI_USER;
+	info->si_code = SI_USER;
 	info->si_pid = task_tgid_vnr(current);
 	info->si_uid = from_kuid_munged(current_user_ns(), current_uid());
 }
@@ -3827,7 +3808,7 @@ SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
 {
 	struct kernel_siginfo info;
 
-	prepare_kill_siginfo(sig, &info, PIDTYPE_TGID);
+	prepare_kill_siginfo(sig, &info);
 
 	return kill_something_info(sig, &info, pid);
 }
@@ -3880,10 +3861,6 @@ static struct pid *pidfd_to_pid(const struct file *file)
 	return tgid_pidfd_to_pid(file);
 }
 
-#define PIDFD_SEND_SIGNAL_FLAGS                            \
-	(PIDFD_SIGNAL_THREAD | PIDFD_SIGNAL_THREAD_GROUP | \
-	 PIDFD_SIGNAL_PROCESS_GROUP)
-
 /**
  * sys_pidfd_send_signal - Signal a process through a pidfd
  * @pidfd:  file descriptor of the process
@@ -3891,10 +3868,14 @@ static struct pid *pidfd_to_pid(const struct file *file)
  * @info:   signal info
  * @flags:  future flags
  *
- * Send the signal to the thread group or to the individual thread depending
- * on PIDFD_THREAD.
- * In the future extension to @flags may be used to override the default scope
- * of @pidfd.
+ * The syscall currently only signals via PIDTYPE_PID which covers
+ * kill(<positive-pid>, <signal>. It does not signal threads or process
+ * groups.
+ * In order to extend the syscall to threads and process groups the @flags
+ * argument should be used. In essence, the @flags argument will determine
+ * what is signaled and not the file descriptor itself. Put in other words,
+ * grouping is a property of the flags argument not a property of the file
+ * descriptor.
  *
  * Return: 0 on success, negative errno on failure
  */
@@ -3905,14 +3886,9 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
 	struct fd f;
 	struct pid *pid;
 	kernel_siginfo_t kinfo;
-	enum pid_type type;
 
 	/* Enforce flags be set to 0 until we add an extension. */
-	if (flags & ~PIDFD_SEND_SIGNAL_FLAGS)
-		return -EINVAL;
-
-	/* Ensure that only a single signal scope determining flag is set. */
-	if (hweight32(flags & PIDFD_SEND_SIGNAL_FLAGS) > 1)
+	if (flags)
 		return -EINVAL;
 
 	f = fdget(pidfd);
@@ -3930,25 +3906,6 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
 	if (!access_pidfd_pidns(pid))
 		goto err;
 
-	switch (flags) {
-	case 0:
-		/* Infer scope from the type of pidfd. */
-		if (f.file->f_flags & PIDFD_THREAD)
-			type = PIDTYPE_PID;
-		else
-			type = PIDTYPE_TGID;
-		break;
-	case PIDFD_SIGNAL_THREAD:
-		type = PIDTYPE_PID;
-		break;
-	case PIDFD_SIGNAL_THREAD_GROUP:
-		type = PIDTYPE_TGID;
-		break;
-	case PIDFD_SIGNAL_PROCESS_GROUP:
-		type = PIDTYPE_PGID;
-		break;
-	}
-
 	if (info) {
 		ret = copy_siginfo_from_user_any(&kinfo, info);
 		if (unlikely(ret))
@@ -3960,17 +3917,15 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
 
 		/* Only allow sending arbitrary signals to yourself. */
 		ret = -EPERM;
-		if ((task_pid(current) != pid || type > PIDTYPE_TGID) &&
+		if ((task_pid(current) != pid) &&
 		    (kinfo.si_code >= 0 || kinfo.si_code == SI_TKILL))
 			goto err;
 	} else {
-		prepare_kill_siginfo(sig, &kinfo, type);
+		prepare_kill_siginfo(sig, &kinfo);
 	}
 
-	if (type == PIDTYPE_PGID)
-		ret = kill_pgrp_info(sig, &kinfo, pid);
-	else
-		ret = kill_pid_info_type(sig, &kinfo, pid, type);
+	ret = kill_pid_info(sig, &kinfo, pid);
+
 err:
 	fdput(f);
 	return ret;
@@ -4010,7 +3965,12 @@ static int do_tkill(pid_t tgid, pid_t pid, int sig)
 {
 	struct kernel_siginfo info;
 
-	prepare_kill_siginfo(sig, &info, PIDTYPE_PID);
+	clear_siginfo(&info);
+	info.si_signo = sig;
+	info.si_errno = 0;
+	info.si_code = SI_TKILL;
+	info.si_pid = task_tgid_vnr(current);
+	info.si_uid = from_kuid_munged(current_user_ns(), current_uid());
 
 	return do_send_specific(tgid, pid, sig, &info);
 }

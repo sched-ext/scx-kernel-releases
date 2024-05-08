@@ -263,7 +263,6 @@ static inline bool cpufreq_supports_freq_invariance(void)
 	return false;
 }
 static inline void disable_cpufreq(void) { }
-static inline void cpufreq_update_limits(unsigned int cpu) { }
 #endif
 
 #ifdef CONFIG_CPU_FREQ_STAT
@@ -569,7 +568,9 @@ static inline unsigned long cpufreq_scale(unsigned long old, u_int div,
 
 /*
  * The polling frequency depends on the capability of the processor. Default
- * polling frequency is 1000 times the transition latency of the processor.
+ * polling frequency is 1000 times the transition latency of the processor. The
+ * ondemand governor will work on any processor with transition latency <= 10ms,
+ * using appropriate sampling rate.
  */
 #define LATENCY_MULTIPLIER		(1000)
 
@@ -692,6 +693,26 @@ struct cpufreq_frequency_table {
 	unsigned int	frequency; /* kHz - doesn't need to be in ascending
 				    * order */
 };
+
+#if defined(CONFIG_CPU_FREQ) && defined(CONFIG_PM_OPP)
+int dev_pm_opp_init_cpufreq_table(struct device *dev,
+				  struct cpufreq_frequency_table **table);
+void dev_pm_opp_free_cpufreq_table(struct device *dev,
+				   struct cpufreq_frequency_table **table);
+#else
+static inline int dev_pm_opp_init_cpufreq_table(struct device *dev,
+						struct cpufreq_frequency_table
+						**table)
+{
+	return -EINVAL;
+}
+
+static inline void dev_pm_opp_free_cpufreq_table(struct device *dev,
+						 struct cpufreq_frequency_table
+						 **table)
+{
+}
+#endif
 
 /*
  * cpufreq_for_each_entry -	iterate over a cpufreq_frequency_table
@@ -1000,18 +1021,6 @@ static inline int cpufreq_table_find_index_c(struct cpufreq_policy *policy,
 						   efficiencies);
 }
 
-static inline bool cpufreq_is_in_limits(struct cpufreq_policy *policy, int idx)
-{
-	unsigned int freq;
-
-	if (idx < 0)
-		return false;
-
-	freq = policy->freq_table[idx].frequency;
-
-	return freq == clamp_val(freq, policy->min, policy->max);
-}
-
 static inline int cpufreq_frequency_table_target(struct cpufreq_policy *policy,
 						 unsigned int target_freq,
 						 unsigned int relation)
@@ -1045,8 +1054,7 @@ retry:
 		return 0;
 	}
 
-	/* Limit frequency index to honor policy->min/max */
-	if (!cpufreq_is_in_limits(policy, idx) && efficiencies) {
+	if (idx < 0 && efficiencies) {
 		efficiencies = false;
 		goto retry;
 	}
@@ -1141,7 +1149,8 @@ static inline int of_perf_domain_get_sharing_cpumask(int pcpu, const char *list_
 		if (ret < 0)
 			continue;
 
-		if (of_phandle_args_equal(pargs, &args))
+		if (pargs->np == args.np && pargs->args_count == args.args_count &&
+		    !memcmp(pargs->args, args.args, sizeof(args.args[0]) * args.args_count))
 			cpumask_set_cpu(cpu, cpumask);
 
 		of_node_put(args.np);

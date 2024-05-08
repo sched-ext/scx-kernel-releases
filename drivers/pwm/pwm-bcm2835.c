@@ -24,6 +24,8 @@
 #define PERIOD_MIN		0x2
 
 struct bcm2835_pwm {
+	struct pwm_chip chip;
+	struct device *dev;
 	void __iomem *base;
 	struct clk *clk;
 	unsigned long rate;
@@ -31,7 +33,7 @@ struct bcm2835_pwm {
 
 static inline struct bcm2835_pwm *to_bcm2835_pwm(struct pwm_chip *chip)
 {
-	return pwmchip_get_drvdata(chip);
+	return container_of(chip, struct bcm2835_pwm, chip);
 }
 
 static int bcm2835_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
@@ -133,14 +135,14 @@ static void devm_clk_rate_exclusive_put(void *data)
 
 static int bcm2835_pwm_probe(struct platform_device *pdev)
 {
-	struct pwm_chip *chip;
 	struct bcm2835_pwm *pc;
 	int ret;
 
-	chip = devm_pwmchip_alloc(&pdev->dev, 2, sizeof(*pc));
-	if (IS_ERR(chip))
-		return PTR_ERR(chip);
-	pc = to_bcm2835_pwm(chip);
+	pc = devm_kzalloc(&pdev->dev, sizeof(*pc), GFP_KERNEL);
+	if (!pc)
+		return -ENOMEM;
+
+	pc->dev = &pdev->dev;
 
 	pc->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pc->base))
@@ -166,12 +168,14 @@ static int bcm2835_pwm_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, -EINVAL,
 				     "failed to get clock rate\n");
 
-	chip->ops = &bcm2835_pwm_ops;
-	chip->atomic = true;
+	pc->chip.dev = &pdev->dev;
+	pc->chip.ops = &bcm2835_pwm_ops;
+	pc->chip.atomic = true;
+	pc->chip.npwm = 2;
 
 	platform_set_drvdata(pdev, pc);
 
-	ret = devm_pwmchip_add(&pdev->dev, chip);
+	ret = devm_pwmchip_add(&pdev->dev, &pc->chip);
 	if (ret < 0)
 		return dev_err_probe(&pdev->dev, ret,
 				     "failed to add pwmchip\n");

@@ -19,6 +19,13 @@
 #define LCB_F_PERCPU	(1U << 4)
 #define LCB_F_MUTEX	(1U << 5)
 
+struct tstamp_data {
+	__u64 timestamp;
+	__u64 lock;
+	__u32 flags;
+	__s32 stack_id;
+};
+
 /* callstack storage  */
 struct {
 	__uint(type, BPF_MAP_TYPE_STACK_TRACE);
@@ -132,8 +139,6 @@ int perf_subsys_id = -1;
 
 /* determine the key of lock stat */
 int aggr_mode;
-
-__u64 end_ts;
 
 /* error stat */
 int task_fail;
@@ -284,7 +289,6 @@ static inline __u32 check_lock_type(__u64 lock, __u32 flags)
 	struct task_struct *curr;
 	struct mm_struct___old *mm_old;
 	struct mm_struct___new *mm_new;
-	struct sighand_struct *sighand;
 
 	switch (flags) {
 	case LCB_F_READ:  /* rwsem */
@@ -306,9 +310,7 @@ static inline __u32 check_lock_type(__u64 lock, __u32 flags)
 		break;
 	case LCB_F_SPIN:  /* spinlock */
 		curr = bpf_get_current_task_btf();
-		sighand = curr->sighand;
-
-		if (sighand && &sighand->siglock == (void *)lock)
+		if (&curr->sighand->siglock == (void *)lock)
 			return LCD_F_SIGHAND_LOCK;
 		break;
 	default:
@@ -554,13 +556,6 @@ int BPF_PROG(collect_lock_syms)
 		lock_flag = LOCK_CLASS_RQLOCK;
 		bpf_map_update_elem(&lock_syms, &lock_addr, &lock_flag, BPF_ANY);
 	}
-	return 0;
-}
-
-SEC("raw_tp/bpf_test_finish")
-int BPF_PROG(end_timestamp)
-{
-	end_ts = bpf_ktime_get_ns();
 	return 0;
 }
 

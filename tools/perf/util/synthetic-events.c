@@ -1055,11 +1055,11 @@ int perf_event__synthesize_threads(struct perf_tool *tool,
 	if (thread_nr > n)
 		thread_nr = n;
 
-	synthesize_threads = calloc(thread_nr, sizeof(pthread_t));
+	synthesize_threads = calloc(sizeof(pthread_t), thread_nr);
 	if (synthesize_threads == NULL)
 		goto free_dirent;
 
-	args = calloc(thread_nr, sizeof(*args));
+	args = calloc(sizeof(*args), thread_nr);
 	if (args == NULL)
 		goto free_threads;
 

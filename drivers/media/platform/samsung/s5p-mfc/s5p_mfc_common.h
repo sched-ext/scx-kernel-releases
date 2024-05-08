@@ -221,15 +221,15 @@ struct s5p_mfc_buf_size_v6 {
 struct s5p_mfc_buf_size {
 	unsigned int fw;
 	unsigned int cpb;
-	const void *priv;
+	void *priv;
 };
 
 struct s5p_mfc_variant {
 	unsigned int version;
 	unsigned int port_num;
 	u32 version_bit;
-	const struct s5p_mfc_buf_size *buf_size;
-	const char	*fw_name[MFC_FW_MAX_VERSIONS];
+	struct s5p_mfc_buf_size *buf_size;
+	char	*fw_name[MFC_FW_MAX_VERSIONS];
 	const char	*clk_names[MFC_MAX_CLOCKS];
 	int		num_clocks;
 	bool		use_clock_gating;
@@ -340,8 +340,8 @@ struct s5p_mfc_dev {
 
 	struct s5p_mfc_priv_buf ctx_buf;
 	int warn_start;
-	const struct s5p_mfc_hw_ops *mfc_ops;
-	const struct s5p_mfc_hw_cmds *mfc_cmds;
+	struct s5p_mfc_hw_ops *mfc_ops;
+	struct s5p_mfc_hw_cmds *mfc_cmds;
 	const struct s5p_mfc_regs *mfc_regs;
 	enum s5p_mfc_fw_ver fw_ver;
 	bool fw_get_done;
@@ -612,6 +612,7 @@ struct s5p_mfc_codec_ops {
  * @chroma_dpb_size:	dpb buffer size for chroma
  * @me_buffer_size:	size of the motion estimation buffer
  * @tmv_buffer_size:	size of temporal predictor motion vector buffer
+ * @frame_type:		used to force the type of the next encoded frame
  * @ref_queue:		list of the reference buffers for encoding
  * @force_frame_type:	encoder's frame type forcing control
  * @ref_queue_cnt:	number of the buffers in the reference list
@@ -638,8 +639,8 @@ struct s5p_mfc_ctx {
 	unsigned int int_err;
 	wait_queue_head_t queue;
 
-	const struct s5p_mfc_fmt *src_fmt;
-	const struct s5p_mfc_fmt *dst_fmt;
+	struct s5p_mfc_fmt *src_fmt;
+	struct s5p_mfc_fmt *dst_fmt;
 
 	struct vb2_queue vq_src;
 	struct vb2_queue vq_dst;

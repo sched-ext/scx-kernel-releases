@@ -46,7 +46,6 @@ ENTRY(phys_startup_64)
 #endif
 
 jiffies = jiffies_64;
-const_pcpu_hot = pcpu_hot;
 
 #if defined(CONFIG_X86_64)
 /*
@@ -133,7 +132,7 @@ SECTIONS
 		LOCK_TEXT
 		KPROBES_TEXT
 		SOFTIRQENTRY_TEXT
-#ifdef CONFIG_MITIGATION_RETPOLINE
+#ifdef CONFIG_RETPOLINE
 		*(.text..__x86.indirect_thunk)
 		*(.text..__x86.return_thunk)
 #endif
@@ -143,7 +142,7 @@ SECTIONS
 		*(.text..__x86.rethunk_untrain)
 		ENTRY_TEXT
 
-#ifdef CONFIG_MITIGATION_SRSO
+#ifdef CONFIG_CPU_SRSO
 		/*
 		 * See the comment above srso_alias_untrain_ret()'s
 		 * definition.
@@ -268,7 +267,7 @@ SECTIONS
 	}
 #endif
 
-#ifdef CONFIG_MITIGATION_RETPOLINE
+#ifdef CONFIG_RETPOLINE
 	/*
 	 * List of instructions that call/jmp/jcc to retpoline thunks
 	 * __x86_indirect_thunk_*(). These instructions can be patched along
@@ -505,11 +504,11 @@ INIT_PER_CPU(irq_stack_backing_store);
            "fixed_percpu_data is not at start of per-cpu area");
 #endif
 
-#ifdef CONFIG_MITIGATION_UNRET_ENTRY
+#ifdef CONFIG_CPU_UNRET_ENTRY
 . = ASSERT((retbleed_return_thunk & 0x3f) == 0, "retbleed_return_thunk not cacheline-aligned");
 #endif
 
-#ifdef CONFIG_MITIGATION_SRSO
+#ifdef CONFIG_CPU_SRSO
 . = ASSERT((srso_safe_ret & 0x3f) == 0, "srso_safe_ret not cacheline-aligned");
 /*
  * GNU ld cannot do XOR until 2.41.

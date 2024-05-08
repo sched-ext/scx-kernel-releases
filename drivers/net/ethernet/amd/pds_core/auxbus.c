@@ -160,28 +160,29 @@ static struct pds_auxiliary_dev *pdsc_auxbus_dev_register(struct pdsc *cf,
 	if (err < 0) {
 		dev_warn(cf->dev, "auxiliary_device_init of %s failed: %pe\n",
 			 name, ERR_PTR(err));
-		kfree(padev);
-		return ERR_PTR(err);
+		goto err_out;
 	}
 
 	err = auxiliary_device_add(aux_dev);
 	if (err) {
 		dev_warn(cf->dev, "auxiliary_device_add of %s failed: %pe\n",
 			 name, ERR_PTR(err));
-		auxiliary_device_uninit(aux_dev);
-		return ERR_PTR(err);
+		goto err_out_uninit;
 	}
 
 	return padev;
+
+err_out_uninit:
+	auxiliary_device_uninit(aux_dev);
+err_out:
+	kfree(padev);
+	return ERR_PTR(err);
 }
 
 int pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf)
 {
 	struct pds_auxiliary_dev *padev;
 	int err = 0;
-
-	if (!cf)
-		return -ENODEV;
 
 	mutex_lock(&pf->config_lock);
 
@@ -201,26 +202,13 @@ int pdsc_auxbus_dev_del(struct pdsc *cf, struct pdsc *pf)
 int pdsc_auxbus_dev_add(struct pdsc *cf, struct pdsc *pf)
 {
 	struct pds_auxiliary_dev *padev;
-	char devname[PDS_DEVNAME_LEN];
 	enum pds_core_vif_types vt;
-	unsigned long mask;
+	char devname[PDS_DEVNAME_LEN];
 	u16 vt_support;
 	int client_id;
 	int err = 0;
 
-	if (!cf)
-		return -ENODEV;
-
 	mutex_lock(&pf->config_lock);
-
-	mask = BIT_ULL(PDSC_S_FW_DEAD) |
-	       BIT_ULL(PDSC_S_STOPPING_DRIVER);
-	if (cf->state & mask) {
-		dev_err(pf->dev, "%s: can't add dev, VF client in bad state %#lx\n",
-			__func__, cf->state);
-		err = -ENXIO;
-		goto out_unlock;
-	}
 
 	/* We only support vDPA so far, so it is the only one to
 	 * be verified that it is available in the Core device and

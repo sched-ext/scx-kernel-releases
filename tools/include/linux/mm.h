@@ -37,9 +37,4 @@ static inline void totalram_pages_add(long count)
 {
 }
 
-static inline int early_pfn_to_nid(unsigned long pfn)
-{
-	return 0;
-}
-
 #endif

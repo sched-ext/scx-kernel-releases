@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Simple Landlock sandbox manager able to execute a process restricted by
- * user-defined file system and network access control policies.
+ * Simple Landlock sandbox manager able to launch a process restricted by a
+ * user-defined filesystem access control policy.
  *
  * Copyright © 2017-2020 Mickaël Salaün <mic@digikod.net>
  * Copyright © 2020 ANSSI
@@ -120,11 +120,9 @@ static int populate_ruleset_fs(const char *const env_var, const int ruleset_fd,
 		if (path_beneath.parent_fd < 0) {
 			fprintf(stderr, "Failed to open \"%s\": %s\n",
 				path_list[i], strerror(errno));
-			continue;
+			goto out_free_name;
 		}
 		if (fstat(path_beneath.parent_fd, &statbuf)) {
-			fprintf(stderr, "Failed to stat \"%s\": %s\n",
-				path_list[i], strerror(errno));
 			close(path_beneath.parent_fd);
 			goto out_free_name;
 		}
@@ -229,7 +227,7 @@ int main(const int argc, char *const argv[], char *const *const envp)
 			ENV_FS_RO_NAME, ENV_FS_RW_NAME, ENV_TCP_BIND_NAME,
 			ENV_TCP_CONNECT_NAME, argv[0]);
 		fprintf(stderr,
-			"Execute a command in a restricted environment.\n\n");
+			"Launch a command in a restricted environment.\n\n");
 		fprintf(stderr,
 			"Environment variables containing paths and ports "
 			"each separated by a colon:\n");
@@ -250,7 +248,7 @@ int main(const int argc, char *const argv[], char *const *const envp)
 			ENV_TCP_CONNECT_NAME);
 		fprintf(stderr,
 			"\nexample:\n"
-			"%s=\"${PATH}:/lib:/usr:/proc:/etc:/dev/urandom\" "
+			"%s=\"/bin:/lib:/usr:/proc:/etc:/dev/urandom\" "
 			"%s=\"/dev/null:/dev/full:/dev/zero:/dev/pts:/tmp\" "
 			"%s=\"9418\" "
 			"%s=\"80:443\" "
@@ -385,7 +383,6 @@ int main(const int argc, char *const argv[], char *const *const envp)
 
 	cmd_path = argv[1];
 	cmd_argv = argv + 1;
-	fprintf(stderr, "Executing the sandboxed command...\n");
 	execvpe(cmd_path, cmd_argv, envp);
 	fprintf(stderr, "Failed to execute \"%s\": %s\n", cmd_path,
 		strerror(errno));

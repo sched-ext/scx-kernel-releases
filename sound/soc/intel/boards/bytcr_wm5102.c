@@ -605,8 +605,7 @@ static int snd_byt_wm5102_mc_probe(struct platform_device *pdev)
 
 	/* find index of codec dai */
 	for (i = 0; i < ARRAY_SIZE(byt_wm5102_dais); i++) {
-		if (byt_wm5102_dais[i].codecs->name &&
-		    !strcmp(byt_wm5102_dais[i].codecs->name,
+		if (!strcmp(byt_wm5102_dais[i].codecs->name,
 			    "wm5102-codec")) {
 			dai_index = i;
 			break;

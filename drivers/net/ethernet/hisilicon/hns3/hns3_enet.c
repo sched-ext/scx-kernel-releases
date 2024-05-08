@@ -2473,9 +2473,9 @@ static netdev_features_t hns3_features_check(struct sk_buff *skb,
 		return features;
 
 	if (skb->encapsulation)
-		len = skb_inner_transport_offset(skb);
+		len = skb_inner_transport_header(skb) - skb->data;
 	else
-		len = skb_transport_offset(skb);
+		len = skb_transport_header(skb) - skb->data;
 
 	/* Assume L4 is 60 byte as TCP is the only protocol with a
 	 * a flexible value, and it's max len is 60 bytes.

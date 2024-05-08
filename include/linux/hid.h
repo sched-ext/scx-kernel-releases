@@ -683,9 +683,9 @@ struct hid_device {							/* device report descriptor */
 
 	unsigned int id;						/* system unique id */
 
-#ifdef CONFIG_HID_BPF
+#ifdef CONFIG_BPF
 	struct hid_bpf bpf;						/* hid-bpf data */
-#endif /* CONFIG_HID_BPF */
+#endif /* CONFIG_BPF */
 };
 
 void hiddev_free(struct kref *ref);

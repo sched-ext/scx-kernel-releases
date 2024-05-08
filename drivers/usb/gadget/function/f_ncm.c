@@ -105,8 +105,8 @@ static inline struct f_ncm *func_to_ncm(struct usb_function *f)
 
 /*
  * Although max mtu as dictated by u_ether is 15412 bytes, setting
- * max_segment_size to 15426 would not be efficient. If user chooses segment
- * size to be (>= 8192), then we can't aggregate more than one buffer in each
+ * max_segment_sizeto 15426 would not be efficient. If user chooses segment
+ * size to be (>= 8192), then we can't aggregate more than one  buffer in each
  * NTB (assuming each packet coming from network layer is >= 8192 bytes) as ep
  * maxpacket limit is 16384. So let max_segment_size be limited to 8000 to allow
  * at least 2 packets to be aggregated reducing wastage of NTB buffer space
@@ -878,7 +878,7 @@ static int ncm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 		if (alt > 1)
 			goto fail;
 
-		if (ncm->netdev) {
+		if (ncm->port.in_ep->enabled) {
 			DBG(cdev, "reset ncm\n");
 			ncm->netdev = NULL;
 			gether_disconnect(&ncm->port);
@@ -1338,15 +1338,7 @@ parse_ntb:
 	     "Parsed NTB with %d frames\n", dgram_counter);
 
 	to_process -= block_len;
-
-	/*
-	 * Windows NCM driver avoids USB ZLPs by adding a 1-byte
-	 * zero pad as needed.
-	 */
-	if (to_process == 1 &&
-	    (*(unsigned char *)(ntb_ptr + block_len) == 0x00)) {
-		to_process--;
-	} else if ((to_process > 0) && (block_len != 0)) {
+	if (to_process != 0) {
 		ntb_ptr = (unsigned char *)(ntb_ptr + block_len);
 		goto parse_ntb;
 	}
@@ -1367,7 +1359,7 @@ static void ncm_disable(struct usb_function *f)
 
 	DBG(cdev, "ncm deactivated\n");
 
-	if (ncm->netdev) {
+	if (ncm->port.in_ep->enabled) {
 		ncm->netdev = NULL;
 		gether_disconnect(&ncm->port);
 	}
@@ -1497,7 +1489,7 @@ static int ncm_bind(struct usb_configuration *c, struct usb_function *f)
 	ncm_data_intf.bInterfaceNumber = status;
 	ncm_union_desc.bSlaveInterface0 = status;
 
-	ecm_desc.wMaxSegmentSize = cpu_to_le16(ncm_opts->max_segment_size);
+	ecm_desc.wMaxSegmentSize = ncm_opts->max_segment_size;
 
 	status = -ENODEV;
 
@@ -1693,7 +1685,7 @@ static struct usb_function_instance *ncm_alloc_inst(void)
 		kfree(opts);
 		return ERR_CAST(net);
 	}
-	opts->max_segment_size = ETH_FRAME_LEN;
+	opts->max_segment_size = cpu_to_le16(ETH_FRAME_LEN);
 	INIT_LIST_HEAD(&opts->ncm_os_desc.ext_prop);
 
 	descs[0] = &opts->ncm_os_desc;

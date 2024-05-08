@@ -109,10 +109,9 @@ static struct perf_thread_map *__thread_map__new_all_cpus(uid_t uid)
 
 		snprintf(path, sizeof(path), "/proc/%d/task", pid);
 		items = scandir(path, &namelist, filter, NULL);
-		if (items <= 0) {
-			pr_debug("scandir for %d returned empty, skipping\n", pid);
-			continue;
-		}
+		if (items <= 0)
+			goto out_free_closedir;
+
 		while (threads->nr + items >= max_threads) {
 			max_threads *= 2;
 			grow = true;
@@ -153,6 +152,8 @@ out_free_namelist:
 	for (i = 0; i < items; i++)
 		zfree(&namelist[i]);
 	free(namelist);
+
+out_free_closedir:
 	zfree(&threads);
 	goto out_closedir;
 }
@@ -279,13 +280,13 @@ struct perf_thread_map *thread_map__new_by_tid_str(const char *tid_str)
 		threads->nr = ntasks;
 	}
 out:
-	strlist__delete(slist);
 	if (threads)
 		refcount_set(&threads->refcnt, 1);
 	return threads;
 
 out_free_threads:
 	zfree(&threads);
+	strlist__delete(slist);
 	goto out;
 }
 

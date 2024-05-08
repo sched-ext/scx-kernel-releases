@@ -142,8 +142,6 @@ struct iwl_phy_context_cmd_v1 {
  * @lmac_id: the lmac id the phy context belongs to
  * @ci: channel info
  * @rxchain_info: ???
- * @sbb_bandwidth: 0 disabled, 1 - 40Mhz ... 4 - 320MHz
- * @sbb_ctrl_channel_loc: location of the control channel
  * @dsp_cfg_flags: set to 0
  * @reserved: reserved to align to 64 bit
  */
@@ -154,20 +152,9 @@ struct iwl_phy_context_cmd {
 	/* PHY_CONTEXT_DATA_API_S_VER_3, PHY_CONTEXT_DATA_API_S_VER_4 */
 	struct iwl_fw_channel_info ci;
 	__le32 lmac_id;
-	union {
-		__le32 rxchain_info; /* reserved in _VER_4 */
-		struct {             /* used for _VER_5/_VER_6 */
-			u8 sbb_bandwidth;
-			u8 sbb_ctrl_channel_loc;
-			__le16 puncture_mask; /* added in VER_6 */
-		};
-	};
+	__le32 rxchain_info; /* reserved in _VER_4 */
 	__le32 dsp_cfg_flags;
 	__le32 reserved;
-} __packed; /* PHY_CONTEXT_CMD_API_VER_3,
-	     * PHY_CONTEXT_CMD_API_VER_4,
-	     * PHY_CONTEXT_CMD_API_VER_5,
-	     * PHY_CONTEXT_CMD_API_VER_6
-	     */
+} __packed; /* PHY_CONTEXT_CMD_API_VER_3, PHY_CONTEXT_CMD_API_VER_4 */
 
 #endif /* __iwl_fw_api_phy_ctxt_h__ */

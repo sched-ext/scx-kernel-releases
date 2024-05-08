@@ -1369,24 +1369,24 @@ static int smu_v13_0_irq_process(struct amdgpu_device *adev,
 		dev_emerg(adev->dev, "ERROR: System is going to shutdown due to GPU HW CTF!\n");
 		orderly_poweroff(true);
 	} else if (client_id == SOC15_IH_CLIENTID_MP1) {
-		if (src_id == SMU_IH_INTERRUPT_ID_TO_DRIVER) {
+		if (src_id == 0xfe) {
 			/* ACK SMUToHost interrupt */
 			data = RREG32_SOC15(MP1, 0, regMP1_SMN_IH_SW_INT_CTRL);
 			data = REG_SET_FIELD(data, MP1_SMN_IH_SW_INT_CTRL, INT_ACK, 1);
 			WREG32_SOC15(MP1, 0, regMP1_SMN_IH_SW_INT_CTRL, data);
 
 			switch (ctxid) {
-			case SMU_IH_INTERRUPT_CONTEXT_ID_AC:
+			case 0x3:
 				dev_dbg(adev->dev, "Switched to AC mode!\n");
 				smu_v13_0_ack_ac_dc_interrupt(smu);
 				adev->pm.ac_power = true;
 				break;
-			case SMU_IH_INTERRUPT_CONTEXT_ID_DC:
+			case 0x4:
 				dev_dbg(adev->dev, "Switched to DC mode!\n");
 				smu_v13_0_ack_ac_dc_interrupt(smu);
 				adev->pm.ac_power = false;
 				break;
-			case SMU_IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING:
+			case 0x7:
 				/*
 				 * Increment the throttle interrupt counter
 				 */
@@ -1399,7 +1399,7 @@ static int smu_v13_0_irq_process(struct amdgpu_device *adev,
 					schedule_work(&smu->throttling_logging_work);
 
 				break;
-			case SMU_IH_INTERRUPT_CONTEXT_ID_FAN_ABNORMAL:
+			case 0x8:
 				high = smu->thermal_range.software_shutdown_temp +
 					smu->thermal_range.software_shutdown_temp_offset;
 				high = min_t(typeof(high),
@@ -1416,7 +1416,7 @@ static int smu_v13_0_irq_process(struct amdgpu_device *adev,
 				data = data & (~THM_THERMAL_INT_CTRL__THERM_TRIGGER_MASK_MASK);
 				WREG32_SOC15(THM, 0, regTHM_THERMAL_INT_CTRL, data);
 				break;
-			case SMU_IH_INTERRUPT_CONTEXT_ID_FAN_RECOVERY:
+			case 0x9:
 				high = min_t(typeof(high),
 					     SMU_THERMAL_MAXIMUM_ALERT_TEMP,
 					     smu->thermal_range.software_shutdown_temp);
@@ -1428,10 +1428,6 @@ static int smu_v13_0_irq_process(struct amdgpu_device *adev,
 							(high & 0xff));
 				data = data & (~THM_THERMAL_INT_CTRL__THERM_TRIGGER_MASK_MASK);
 				WREG32_SOC15(THM, 0, regTHM_THERMAL_INT_CTRL, data);
-				break;
-			default:
-				dev_dbg(adev->dev, "Unhandled context id %d from client:%d!\n",
-									ctxid, client_id);
 				break;
 			}
 		}
@@ -1477,7 +1473,7 @@ int smu_v13_0_register_irq_handler(struct smu_context *smu)
 		return ret;
 
 	ret = amdgpu_irq_add_id(adev, SOC15_IH_CLIENTID_MP1,
-				SMU_IH_INTERRUPT_ID_TO_DRIVER,
+				0xfe,
 				irq_src);
 	if (ret)
 		return ret;

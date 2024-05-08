@@ -524,58 +524,46 @@ static ssize_t amdgpu_debugfs_mqd_read(struct file *f, char __user *buf,
 {
 	struct amdgpu_ring *ring = file_inode(f)->i_private;
 	volatile u32 *mqd;
-	u32 *kbuf;
-	int r, i;
+	int r;
 	uint32_t value, result;
 
 	if (*pos & 3 || size & 3)
 		return -EINVAL;
 
-	kbuf = kmalloc(ring->mqd_size, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
+	result = 0;
 
 	r = amdgpu_bo_reserve(ring->mqd_obj, false);
 	if (unlikely(r != 0))
-		goto err_free;
+		return r;
 
 	r = amdgpu_bo_kmap(ring->mqd_obj, (void **)&mqd);
-	if (r)
-		goto err_unreserve;
+	if (r) {
+		amdgpu_bo_unreserve(ring->mqd_obj);
+		return r;
+	}
 
-	/*
-	 * Copy to local buffer to avoid put_user(), which might fault
-	 * and acquire mmap_sem, under reservation_ww_class_mutex.
-	 */
-	for (i = 0; i < ring->mqd_size/sizeof(u32); i++)
-		kbuf[i] = mqd[i];
-
-	amdgpu_bo_kunmap(ring->mqd_obj);
-	amdgpu_bo_unreserve(ring->mqd_obj);
-
-	result = 0;
 	while (size) {
 		if (*pos >= ring->mqd_size)
-			break;
+			goto done;
 
-		value = kbuf[*pos/4];
+		value = mqd[*pos/4];
 		r = put_user(value, (uint32_t *)buf);
 		if (r)
-			goto err_free;
+			goto done;
 		buf += 4;
 		result += 4;
 		size -= 4;
 		*pos += 4;
 	}
 
-	kfree(kbuf);
-	return result;
-
-err_unreserve:
+done:
+	amdgpu_bo_kunmap(ring->mqd_obj);
+	mqd = NULL;
 	amdgpu_bo_unreserve(ring->mqd_obj);
-err_free:
-	kfree(kbuf);
-	return r;
+	if (r)
+		return r;
+
+	return result;
 }
 
 static const struct file_operations amdgpu_debugfs_mqd_fops = {
@@ -647,7 +635,6 @@ int amdgpu_ring_test_helper(struct amdgpu_ring *ring)
 			      ring->name);
 
 	ring->sched.ready = !r;
-
 	return r;
 }
 
@@ -729,15 +716,4 @@ void amdgpu_ring_ib_on_emit_de(struct amdgpu_ring *ring)
 {
 	if (ring->is_sw_ring)
 		amdgpu_sw_ring_ib_mark_offset(ring, AMDGPU_MUX_OFFSET_TYPE_DE);
-}
-
-bool amdgpu_ring_sched_ready(struct amdgpu_ring *ring)
-{
-	if (!ring)
-		return false;
-
-	if (ring->no_scheduler || !drm_sched_wqueue_ready(&ring->sched))
-		return false;
-
-	return true;
 }

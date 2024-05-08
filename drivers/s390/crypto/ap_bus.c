@@ -38,7 +38,6 @@
 #include <linux/debugfs.h>
 #include <linux/ctype.h>
 #include <linux/module.h>
-#include <asm/uv.h>
 
 #include "ap_bus.h"
 #include "ap_debug.h"
@@ -84,11 +83,14 @@ EXPORT_SYMBOL(ap_perms);
 DEFINE_MUTEX(ap_perms_mutex);
 EXPORT_SYMBOL(ap_perms_mutex);
 
+/* # of bus scans since init */
+static atomic64_t ap_scan_bus_count;
+
 /* # of bindings complete since init */
 static atomic64_t ap_bindings_complete_count = ATOMIC64_INIT(0);
 
-/* completion for APQN bindings complete */
-static DECLARE_COMPLETION(ap_apqn_bindings_complete);
+/* completion for initial APQN bindings complete */
+static DECLARE_COMPLETION(ap_init_apqn_bindings_complete);
 
 static struct ap_config_info *ap_qci_info;
 static struct ap_config_info *ap_qci_info_old;
@@ -99,16 +101,12 @@ static struct ap_config_info *ap_qci_info_old;
 debug_info_t *ap_dbf_info;
 
 /*
- * AP bus rescan related things.
+ * Workqueue timer for bus rescan.
  */
-static bool ap_scan_bus(void);
-static bool ap_scan_bus_result; /* result of last ap_scan_bus() */
-static DEFINE_MUTEX(ap_scan_bus_mutex); /* mutex ap_scan_bus() invocations */
-static atomic64_t ap_scan_bus_count; /* counter ap_scan_bus() invocations */
-static int ap_scan_bus_time = AP_CONFIG_TIME;
-static struct timer_list ap_scan_bus_timer;
-static void ap_scan_bus_wq_callback(struct work_struct *);
-static DECLARE_WORK(ap_scan_bus_work, ap_scan_bus_wq_callback);
+static struct timer_list ap_config_timer;
+static int ap_config_time = AP_CONFIG_TIME;
+static void ap_scan_bus(struct work_struct *);
+static DECLARE_WORK(ap_scan_work, ap_scan_bus);
 
 /*
  * Tasklet & timer for AP request polling and interrupts
@@ -137,7 +135,7 @@ static int ap_max_domain_id = 15;
 /* Maximum adapter id, if not given via qci */
 static int ap_max_adapter_id = 63;
 
-static const struct bus_type ap_bus_type;
+static struct bus_type ap_bus_type;
 
 /* Adapter interrupt definitions */
 static void ap_interrupt_handler(struct airq_struct *airq,
@@ -755,7 +753,7 @@ static void ap_calc_bound_apqns(unsigned int *apqns, unsigned int *bound)
 }
 
 /*
- * After ap bus scan do check if all existing APQNs are
+ * After initial ap bus scan do check if all existing APQNs are
  * bound to device drivers.
  */
 static void ap_check_bindings_complete(void)
@@ -765,9 +763,9 @@ static void ap_check_bindings_complete(void)
 	if (atomic64_read(&ap_scan_bus_count) >= 1) {
 		ap_calc_bound_apqns(&apqns, &bound);
 		if (bound == apqns) {
-			if (!completion_done(&ap_apqn_bindings_complete)) {
-				complete_all(&ap_apqn_bindings_complete);
-				pr_debug("%s all apqn bindings complete\n", __func__);
+			if (!completion_done(&ap_init_apqn_bindings_complete)) {
+				complete_all(&ap_init_apqn_bindings_complete);
+				AP_DBF_INFO("%s complete\n", __func__);
 			}
 			ap_send_bindings_complete_uevent();
 		}
@@ -784,29 +782,27 @@ static void ap_check_bindings_complete(void)
  * -ETIME is returned. On failures negative return values are
  * returned to the caller.
  */
-int ap_wait_apqn_bindings_complete(unsigned long timeout)
+int ap_wait_init_apqn_bindings_complete(unsigned long timeout)
 {
-	int rc = 0;
 	long l;
 
-	if (completion_done(&ap_apqn_bindings_complete))
+	if (completion_done(&ap_init_apqn_bindings_complete))
 		return 0;
 
 	if (timeout)
 		l = wait_for_completion_interruptible_timeout(
-			&ap_apqn_bindings_complete, timeout);
+			&ap_init_apqn_bindings_complete, timeout);
 	else
 		l = wait_for_completion_interruptible(
-			&ap_apqn_bindings_complete);
+			&ap_init_apqn_bindings_complete);
 	if (l < 0)
-		rc = l == -ERESTARTSYS ? -EINTR : l;
+		return l == -ERESTARTSYS ? -EINTR : l;
 	else if (l == 0 && timeout)
-		rc = -ETIME;
+		return -ETIME;
 
-	pr_debug("%s rc=%d\n", __func__, rc);
-	return rc;
+	return 0;
 }
-EXPORT_SYMBOL(ap_wait_apqn_bindings_complete);
+EXPORT_SYMBOL(ap_wait_init_apqn_bindings_complete);
 
 static int __ap_queue_devices_with_id_unregister(struct device *dev, void *data)
 {
@@ -830,8 +826,8 @@ static int __ap_revise_reserved(struct device *dev, void *dummy)
 		drvres = to_ap_drv(dev->driver)->flags
 			& AP_DRIVER_FLAG_DEFAULT;
 		if (!!devres != !!drvres) {
-			pr_debug("%s reprobing queue=%02x.%04x\n",
-				 __func__, card, queue);
+			AP_DBF_DBG("%s reprobing queue=%02x.%04x\n",
+				   __func__, card, queue);
 			rc = device_reprobe(dev);
 			if (rc)
 				AP_DBF_WARN("%s reprobing queue=%02x.%04x failed\n",
@@ -943,6 +939,8 @@ static int ap_device_probe(struct device *dev)
 		if (is_queue_dev(dev))
 			hash_del(&to_ap_queue(dev)->hnode);
 		spin_unlock_bh(&ap_queues_lock);
+	} else {
+		ap_check_bindings_complete();
 	}
 
 out:
@@ -1014,47 +1012,16 @@ void ap_driver_unregister(struct ap_driver *ap_drv)
 }
 EXPORT_SYMBOL(ap_driver_unregister);
 
-/*
- * Enforce a synchronous AP bus rescan.
- * Returns true if the bus scan finds a change in the AP configuration
- * and AP devices have been added or deleted when this function returns.
- */
-bool ap_bus_force_rescan(void)
+void ap_bus_force_rescan(void)
 {
-	unsigned long scan_counter = atomic64_read(&ap_scan_bus_count);
-	bool rc = false;
-
-	pr_debug(">%s scan counter=%lu\n", __func__, scan_counter);
-
 	/* Only trigger AP bus scans after the initial scan is done */
-	if (scan_counter <= 0)
-		goto out;
+	if (atomic64_read(&ap_scan_bus_count) <= 0)
+		return;
 
-	/* Try to acquire the AP scan bus mutex */
-	if (mutex_trylock(&ap_scan_bus_mutex)) {
-		/* mutex acquired, run the AP bus scan */
-		ap_scan_bus_result = ap_scan_bus();
-		rc = ap_scan_bus_result;
-		mutex_unlock(&ap_scan_bus_mutex);
-		goto out;
-	}
-
-	/*
-	 * Mutex acquire failed. So there is currently another task
-	 * already running the AP bus scan. Then let's simple wait
-	 * for the lock which means the other task has finished and
-	 * stored the result in ap_scan_bus_result.
-	 */
-	if (mutex_lock_interruptible(&ap_scan_bus_mutex)) {
-		/* some error occurred, ignore and go out */
-		goto out;
-	}
-	rc = ap_scan_bus_result;
-	mutex_unlock(&ap_scan_bus_mutex);
-
-out:
-	pr_debug("%s rc=%d\n", __func__, rc);
-	return rc;
+	/* processing a asynchronous bus rescan */
+	del_timer(&ap_config_timer);
+	queue_work(system_long_wq, &ap_scan_work);
+	flush_work(&ap_scan_work);
 }
 EXPORT_SYMBOL(ap_bus_force_rescan);
 
@@ -1063,7 +1030,7 @@ EXPORT_SYMBOL(ap_bus_force_rescan);
  */
 void ap_bus_cfg_chg(void)
 {
-	pr_debug("%s config change, forcing bus rescan\n", __func__);
+	AP_DBF_DBG("%s config change, forcing bus rescan\n", __func__);
 
 	ap_bus_force_rescan();
 }
@@ -1283,7 +1250,7 @@ static BUS_ATTR_RO(ap_interrupts);
 
 static ssize_t config_time_show(const struct bus_type *bus, char *buf)
 {
-	return sysfs_emit(buf, "%d\n", ap_scan_bus_time);
+	return sysfs_emit(buf, "%d\n", ap_config_time);
 }
 
 static ssize_t config_time_store(const struct bus_type *bus,
@@ -1293,8 +1260,8 @@ static ssize_t config_time_store(const struct bus_type *bus,
 
 	if (sscanf(buf, "%d\n", &time) != 1 || time < 5 || time > 120)
 		return -EINVAL;
-	ap_scan_bus_time = time;
-	mod_timer(&ap_scan_bus_timer, jiffies + ap_scan_bus_time * HZ);
+	ap_config_time = time;
+	mod_timer(&ap_config_timer, jiffies + ap_config_time * HZ);
 	return count;
 }
 
@@ -1636,7 +1603,7 @@ static struct attribute *ap_bus_attrs[] = {
 };
 ATTRIBUTE_GROUPS(ap_bus);
 
-static const struct bus_type ap_bus_type = {
+static struct bus_type ap_bus_type = {
 	.name = "ap",
 	.bus_groups = ap_bus_groups,
 	.match = &ap_bus_match,
@@ -1921,8 +1888,8 @@ static inline void ap_scan_domains(struct ap_card *ac)
 				aq->last_err_rc = AP_RESPONSE_CHECKSTOPPED;
 			}
 			spin_unlock_bh(&aq->lock);
-			pr_debug("%s(%d,%d) queue dev checkstop on\n",
-				 __func__, ac->id, dom);
+			AP_DBF_DBG("%s(%d,%d) queue dev checkstop on\n",
+				   __func__, ac->id, dom);
 			/* 'receive' pending messages with -EAGAIN */
 			ap_flush_queue(aq);
 			goto put_dev_and_continue;
@@ -1932,8 +1899,8 @@ static inline void ap_scan_domains(struct ap_card *ac)
 			if (aq->dev_state > AP_DEV_STATE_UNINITIATED)
 				_ap_queue_init_state(aq);
 			spin_unlock_bh(&aq->lock);
-			pr_debug("%s(%d,%d) queue dev checkstop off\n",
-				 __func__, ac->id, dom);
+			AP_DBF_DBG("%s(%d,%d) queue dev checkstop off\n",
+				   __func__, ac->id, dom);
 			goto put_dev_and_continue;
 		}
 		/* config state change */
@@ -1945,8 +1912,8 @@ static inline void ap_scan_domains(struct ap_card *ac)
 				aq->last_err_rc = AP_RESPONSE_DECONFIGURED;
 			}
 			spin_unlock_bh(&aq->lock);
-			pr_debug("%s(%d,%d) queue dev config off\n",
-				 __func__, ac->id, dom);
+			AP_DBF_DBG("%s(%d,%d) queue dev config off\n",
+				   __func__, ac->id, dom);
 			ap_send_config_uevent(&aq->ap_dev, aq->config);
 			/* 'receive' pending messages with -EAGAIN */
 			ap_flush_queue(aq);
@@ -1957,8 +1924,8 @@ static inline void ap_scan_domains(struct ap_card *ac)
 			if (aq->dev_state > AP_DEV_STATE_UNINITIATED)
 				_ap_queue_init_state(aq);
 			spin_unlock_bh(&aq->lock);
-			pr_debug("%s(%d,%d) queue dev config on\n",
-				 __func__, ac->id, dom);
+			AP_DBF_DBG("%s(%d,%d) queue dev config on\n",
+				   __func__, ac->id, dom);
 			ap_send_config_uevent(&aq->ap_dev, aq->config);
 			goto put_dev_and_continue;
 		}
@@ -2030,8 +1997,8 @@ static inline void ap_scan_adapter(int ap)
 			ap_scan_rm_card_dev_and_queue_devs(ac);
 			put_device(dev);
 		} else {
-			pr_debug("%s(%d) no type info (no APQN found), ignored\n",
-				 __func__, ap);
+			AP_DBF_DBG("%s(%d) no type info (no APQN found), ignored\n",
+				   __func__, ap);
 		}
 		return;
 	}
@@ -2043,8 +2010,8 @@ static inline void ap_scan_adapter(int ap)
 			ap_scan_rm_card_dev_and_queue_devs(ac);
 			put_device(dev);
 		} else {
-			pr_debug("%s(%d) no valid type (0) info, ignored\n",
-				 __func__, ap);
+			AP_DBF_DBG("%s(%d) no valid type (0) info, ignored\n",
+				   __func__, ap);
 		}
 		return;
 	}
@@ -2168,79 +2135,22 @@ static bool ap_get_configuration(void)
 		      sizeof(struct ap_config_info)) != 0;
 }
 
-/*
- * ap_config_has_new_aps - Check current against old qci info if
- * new adapters have appeared. Returns true if at least one new
- * adapter in the apm mask is showing up. Existing adapters or
- * receding adapters are not counted.
- */
-static bool ap_config_has_new_aps(void)
-{
-
-	unsigned long m[BITS_TO_LONGS(AP_DEVICES)];
-
-	if (!ap_qci_info)
-		return false;
-
-	bitmap_andnot(m, (unsigned long *)ap_qci_info->apm,
-		      (unsigned long *)ap_qci_info_old->apm, AP_DEVICES);
-	if (!bitmap_empty(m, AP_DEVICES))
-		return true;
-
-	return false;
-}
-
-/*
- * ap_config_has_new_doms - Check current against old qci info if
- * new (usage) domains have appeared. Returns true if at least one
- * new domain in the aqm mask is showing up. Existing domains or
- * receding domains are not counted.
- */
-static bool ap_config_has_new_doms(void)
-{
-	unsigned long m[BITS_TO_LONGS(AP_DOMAINS)];
-
-	if (!ap_qci_info)
-		return false;
-
-	bitmap_andnot(m, (unsigned long *)ap_qci_info->aqm,
-		      (unsigned long *)ap_qci_info_old->aqm, AP_DOMAINS);
-	if (!bitmap_empty(m, AP_DOMAINS))
-		return true;
-
-	return false;
-}
-
 /**
  * ap_scan_bus(): Scan the AP bus for new devices
- * Always run under mutex ap_scan_bus_mutex protection
- * which needs to get locked/unlocked by the caller!
- * Returns true if any config change has been detected
- * during the scan, otherwise false.
+ * Runs periodically, workqueue timer (ap_config_time)
+ * @unused: Unused pointer.
  */
-static bool ap_scan_bus(void)
+static void ap_scan_bus(struct work_struct *unused)
 {
-	bool config_changed;
-	int ap;
+	int ap, config_changed = 0;
 
-	pr_debug(">%s\n", __func__);
-
-	/* (re-)fetch configuration via QCI */
+	/* config change notify */
 	config_changed = ap_get_configuration();
-	if (config_changed) {
-		if (ap_config_has_new_aps() || ap_config_has_new_doms()) {
-			/*
-			 * Appearance of new adapters and/or domains need to
-			 * build new ap devices which need to get bound to an
-			 * device driver. Thus reset the APQN bindings complete
-			 * completion.
-			 */
-			reinit_completion(&ap_apqn_bindings_complete);
-		}
-		/* post a config change notify */
+	if (config_changed)
 		notify_config_changed();
-	}
 	ap_select_domain();
+
+	AP_DBF_DBG("%s running\n", __func__);
 
 	/* loop over all possible adapters */
 	for (ap = 0; ap <= ap_max_adapter_id; ap++)
@@ -2264,56 +2174,23 @@ static bool ap_scan_bus(void)
 	}
 
 	if (atomic64_inc_return(&ap_scan_bus_count) == 1) {
-		pr_debug("%s init scan complete\n", __func__);
+		AP_DBF_DBG("%s init scan complete\n", __func__);
 		ap_send_init_scan_done_uevent();
+		ap_check_bindings_complete();
 	}
 
-	ap_check_bindings_complete();
-
-	mod_timer(&ap_scan_bus_timer, jiffies + ap_scan_bus_time * HZ);
-
-	pr_debug("<%s config_changed=%d\n", __func__, config_changed);
-
-	return config_changed;
+	mod_timer(&ap_config_timer, jiffies + ap_config_time * HZ);
 }
 
-/*
- * Callback for the ap_scan_bus_timer
- * Runs periodically, workqueue timer (ap_scan_bus_time)
- */
-static void ap_scan_bus_timer_callback(struct timer_list *unused)
+static void ap_config_timeout(struct timer_list *unused)
 {
-	/*
-	 * schedule work into the system long wq which when
-	 * the work is finally executed, calls the AP bus scan.
-	 */
-	queue_work(system_long_wq, &ap_scan_bus_work);
-}
-
-/*
- * Callback for the ap_scan_bus_work
- */
-static void ap_scan_bus_wq_callback(struct work_struct *unused)
-{
-	/*
-	 * Try to invoke an ap_scan_bus(). If the mutex acquisition
-	 * fails there is currently another task already running the
-	 * AP scan bus and there is no need to wait and re-trigger the
-	 * scan again. Please note at the end of the scan bus function
-	 * the AP scan bus timer is re-armed which triggers then the
-	 * ap_scan_bus_timer_callback which enqueues a work into the
-	 * system_long_wq which invokes this function here again.
-	 */
-	if (mutex_trylock(&ap_scan_bus_mutex)) {
-		ap_scan_bus_result = ap_scan_bus();
-		mutex_unlock(&ap_scan_bus_mutex);
-	}
+	queue_work(system_long_wq, &ap_scan_work);
 }
 
 static int __init ap_debug_init(void)
 {
 	ap_dbf_info = debug_register("ap", 2, 1,
-				     AP_DBF_MAX_SPRINTF_ARGS * sizeof(long));
+				     DBF_MAX_SPRINTF_ARGS * sizeof(long));
 	debug_register_view(ap_dbf_info, &debug_sprintf_view);
 	debug_set_level(ap_dbf_info, DBF_ERR);
 
@@ -2397,7 +2274,7 @@ static int __init ap_module_init(void)
 	ap_root_device->bus = &ap_bus_type;
 
 	/* Setup the AP bus rescan timer. */
-	timer_setup(&ap_scan_bus_timer, ap_scan_bus_timer_callback, 0);
+	timer_setup(&ap_config_timer, ap_config_timeout, 0);
 
 	/*
 	 * Setup the high resolution poll timer.
@@ -2415,7 +2292,7 @@ static int __init ap_module_init(void)
 			goto out_work;
 	}
 
-	queue_work(system_long_wq, &ap_scan_bus_work);
+	queue_work(system_long_wq, &ap_scan_work);
 
 	return 0;
 

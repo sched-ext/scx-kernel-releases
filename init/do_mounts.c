@@ -208,9 +208,6 @@ retry:
 				goto out;
 			case -EACCES:
 			case -EINVAL:
-#ifdef CONFIG_BLOCK
-				init_flush_fput();
-#endif
 				continue;
 		}
 	        /*

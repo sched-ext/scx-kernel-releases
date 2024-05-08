@@ -15,7 +15,6 @@
 #include "aq_macsec.h"
 #include "aq_main.h"
 
-#include <linux/linkmode.h>
 #include <linux/ptp_clock_kernel.h>
 
 static void aq_ethtool_get_regs(struct net_device *ndev,
@@ -682,19 +681,23 @@ static int aq_ethtool_get_ts_info(struct net_device *ndev,
 	return 0;
 }
 
-static void eee_mask_to_ethtool_mask(unsigned long *mode, u32 speed)
+static u32 eee_mask_to_ethtool_mask(u32 speed)
 {
+	u32 rate = 0;
+
 	if (speed & AQ_NIC_RATE_EEE_10G)
-		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseT_Full_BIT, mode);
+		rate |= SUPPORTED_10000baseT_Full;
 
 	if (speed & AQ_NIC_RATE_EEE_1G)
-		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT, mode);
+		rate |= SUPPORTED_1000baseT_Full;
 
 	if (speed & AQ_NIC_RATE_EEE_100M)
-		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT, mode);
+		rate |= SUPPORTED_100baseT_Full;
+
+	return rate;
 }
 
-static int aq_ethtool_get_eee(struct net_device *ndev, struct ethtool_keee *eee)
+static int aq_ethtool_get_eee(struct net_device *ndev, struct ethtool_eee *eee)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 	u32 rate, supported_rates;
@@ -710,14 +713,14 @@ static int aq_ethtool_get_eee(struct net_device *ndev, struct ethtool_keee *eee)
 	if (err < 0)
 		return err;
 
-	eee_mask_to_ethtool_mask(eee->supported, supported_rates);
+	eee->supported = eee_mask_to_ethtool_mask(supported_rates);
 
 	if (aq_nic->aq_nic_cfg.eee_speeds)
-		linkmode_copy(eee->advertised, eee->supported);
+		eee->advertised = eee->supported;
 
-	eee_mask_to_ethtool_mask(eee->lp_advertised, rate);
+	eee->lp_advertised = eee_mask_to_ethtool_mask(rate);
 
-	eee->eee_enabled = !linkmode_empty(eee->advertised);
+	eee->eee_enabled = !!eee->advertised;
 
 	eee->tx_lpi_enabled = eee->eee_enabled;
 	if ((supported_rates & rate) & AQ_NIC_RATE_EEE_MSK)
@@ -726,7 +729,7 @@ static int aq_ethtool_get_eee(struct net_device *ndev, struct ethtool_keee *eee)
 	return 0;
 }
 
-static int aq_ethtool_set_eee(struct net_device *ndev, struct ethtool_keee *eee)
+static int aq_ethtool_set_eee(struct net_device *ndev, struct ethtool_eee *eee)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 	u32 rate, supported_rates;

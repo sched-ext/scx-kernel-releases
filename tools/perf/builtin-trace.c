@@ -74,7 +74,6 @@
 #include <linux/err.h>
 #include <linux/filter.h>
 #include <linux/kernel.h>
-#include <linux/list_sort.h>
 #include <linux/random.h>
 #include <linux/stringify.h>
 #include <linux/time64.h>
@@ -4313,38 +4312,34 @@ static unsigned long thread__nr_events(struct thread_trace *ttrace)
 	return ttrace ? ttrace->nr_events : 0;
 }
 
-static int trace_nr_events_cmp(void *priv __maybe_unused,
-			       const struct list_head *la,
-			       const struct list_head *lb)
+DEFINE_RESORT_RB(threads,
+		(thread__nr_events(thread__priv(a->thread)) <
+		 thread__nr_events(thread__priv(b->thread))),
+	struct thread *thread;
+)
 {
-	struct thread_list *a = list_entry(la, struct thread_list, list);
-	struct thread_list *b = list_entry(lb, struct thread_list, list);
-	unsigned long a_nr_events = thread__nr_events(thread__priv(a->thread));
-	unsigned long b_nr_events = thread__nr_events(thread__priv(b->thread));
-
-	if (a_nr_events != b_nr_events)
-		return a_nr_events < b_nr_events ? -1 : 1;
-
-	/* Identical number of threads, place smaller tids first. */
-	return thread__tid(a->thread) < thread__tid(b->thread)
-		? -1
-		: (thread__tid(a->thread) > thread__tid(b->thread) ? 1 : 0);
+	entry->thread = rb_entry(nd, struct thread_rb_node, rb_node)->thread;
 }
 
 static size_t trace__fprintf_thread_summary(struct trace *trace, FILE *fp)
 {
 	size_t printed = trace__fprintf_threads_header(fp);
-	LIST_HEAD(threads);
+	struct rb_node *nd;
+	int i;
 
-	if (machine__thread_list(trace->host, &threads) == 0) {
-		struct thread_list *pos;
+	for (i = 0; i < THREADS__TABLE_SIZE; i++) {
+		DECLARE_RESORT_RB_MACHINE_THREADS(threads, trace->host, i);
 
-		list_sort(NULL, &threads, trace_nr_events_cmp);
+		if (threads == NULL) {
+			fprintf(fp, "%s", "Error sorting output by nr_events!\n");
+			return 0;
+		}
 
-		list_for_each_entry(pos, &threads, list)
-			printed += trace__fprintf_thread(fp, pos->thread, trace);
+		resort_rb__for_each_entry(nd, threads)
+			printed += trace__fprintf_thread(fp, threads_entry->thread, trace);
+
+		resort_rb__delete(threads);
 	}
-	thread_list__delete(&threads);
 	return printed;
 }
 

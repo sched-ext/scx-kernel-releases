@@ -13,6 +13,7 @@
 #include "ctree.h"
 #include "extent_io.h"
 #include "locking.h"
+#include "accessors.h"
 
 /*
  * Lockdep class keys for extent_buffer->lock's in this root.  For a given
@@ -84,7 +85,7 @@ void btrfs_set_buffer_lockdep_class(u64 objectid, struct extent_buffer *eb, int 
 {
 	struct btrfs_lockdep_keyset *ks;
 
-	ASSERT(level < ARRAY_SIZE(ks->keys));
+	BUG_ON(level >= ARRAY_SIZE(ks->keys));
 
 	/* Find the matching keyset, id 0 is the default entry */
 	for (ks = btrfs_lockdep_keysets; ks->id; ks++)

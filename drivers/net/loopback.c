@@ -144,7 +144,6 @@ static int loopback_dev_init(struct net_device *dev)
 	dev->lstats = netdev_alloc_pcpu_stats(struct pcpu_lstats);
 	if (!dev->lstats)
 		return -ENOMEM;
-	netdev_lockdep_set_classes(dev);
 	return 0;
 }
 

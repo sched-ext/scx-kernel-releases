@@ -89,21 +89,33 @@ static u32 sdma_v5_2_get_reg_offset(struct amdgpu_device *adev, u32 instance, u3
 	return base + internal_offset;
 }
 
-static unsigned sdma_v5_2_ring_init_cond_exec(struct amdgpu_ring *ring,
-					      uint64_t addr)
+static unsigned sdma_v5_2_ring_init_cond_exec(struct amdgpu_ring *ring)
 {
 	unsigned ret;
 
 	amdgpu_ring_write(ring, SDMA_PKT_HEADER_OP(SDMA_OP_COND_EXE));
-	amdgpu_ring_write(ring, lower_32_bits(addr));
-	amdgpu_ring_write(ring, upper_32_bits(addr));
+	amdgpu_ring_write(ring, lower_32_bits(ring->cond_exe_gpu_addr));
+	amdgpu_ring_write(ring, upper_32_bits(ring->cond_exe_gpu_addr));
 	amdgpu_ring_write(ring, 1);
-	/* this is the offset we need patch later */
-	ret = ring->wptr & ring->buf_mask;
-	/* insert dummy here and patch it later */
-	amdgpu_ring_write(ring, 0);
+	ret = ring->wptr & ring->buf_mask;/* this is the offset we need patch later */
+	amdgpu_ring_write(ring, 0x55aa55aa);/* insert dummy here and patch it later */
 
 	return ret;
+}
+
+static void sdma_v5_2_ring_patch_cond_exec(struct amdgpu_ring *ring,
+					   unsigned offset)
+{
+	unsigned cur;
+
+	BUG_ON(offset > ring->buf_mask);
+	BUG_ON(ring->ring[offset] != 0x55aa55aa);
+
+	cur = (ring->wptr - 1) & ring->buf_mask;
+	if (cur > offset)
+		ring->ring[offset] = cur - offset;
+	else
+		ring->ring[offset] = (ring->buf_mask + 1) - offset + cur;
 }
 
 /**
@@ -280,21 +292,17 @@ static void sdma_v5_2_ring_emit_hdp_flush(struct amdgpu_ring *ring)
 	u32 ref_and_mask = 0;
 	const struct nbio_hdp_flush_reg *nbio_hf_reg = adev->nbio.hdp_flush_reg;
 
-	if (ring->me > 1) {
-		amdgpu_asic_flush_hdp(adev, ring);
-	} else {
-		ref_and_mask = nbio_hf_reg->ref_and_mask_sdma0 << ring->me;
+	ref_and_mask = nbio_hf_reg->ref_and_mask_sdma0 << ring->me;
 
-		amdgpu_ring_write(ring, SDMA_PKT_HEADER_OP(SDMA_OP_POLL_REGMEM) |
-				  SDMA_PKT_POLL_REGMEM_HEADER_HDP_FLUSH(1) |
-				  SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3)); /* == */
-		amdgpu_ring_write(ring, (adev->nbio.funcs->get_hdp_flush_done_offset(adev)) << 2);
-		amdgpu_ring_write(ring, (adev->nbio.funcs->get_hdp_flush_req_offset(adev)) << 2);
-		amdgpu_ring_write(ring, ref_and_mask); /* reference */
-		amdgpu_ring_write(ring, ref_and_mask); /* mask */
-		amdgpu_ring_write(ring, SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff) |
-				  SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(10)); /* retry count, poll interval */
-	}
+	amdgpu_ring_write(ring, SDMA_PKT_HEADER_OP(SDMA_OP_POLL_REGMEM) |
+			  SDMA_PKT_POLL_REGMEM_HEADER_HDP_FLUSH(1) |
+			  SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3)); /* == */
+	amdgpu_ring_write(ring, (adev->nbio.funcs->get_hdp_flush_done_offset(adev)) << 2);
+	amdgpu_ring_write(ring, (adev->nbio.funcs->get_hdp_flush_req_offset(adev)) << 2);
+	amdgpu_ring_write(ring, ref_and_mask); /* reference */
+	amdgpu_ring_write(ring, ref_and_mask); /* mask */
+	amdgpu_ring_write(ring, SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff) |
+			  SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(10)); /* retry count, poll interval */
 }
 
 /**
@@ -1714,6 +1722,7 @@ static const struct amdgpu_ring_funcs sdma_v5_2_ring_funcs = {
 	.emit_reg_wait = sdma_v5_2_ring_emit_reg_wait,
 	.emit_reg_write_reg_wait = sdma_v5_2_ring_emit_reg_write_reg_wait,
 	.init_cond_exec = sdma_v5_2_ring_init_cond_exec,
+	.patch_cond_exec = sdma_v5_2_ring_patch_cond_exec,
 	.preempt_ib = sdma_v5_2_ring_preempt_ib,
 };
 

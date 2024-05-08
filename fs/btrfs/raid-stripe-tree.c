@@ -11,6 +11,7 @@
 #include "disk-io.h"
 #include "raid-stripe-tree.h"
 #include "volumes.h"
+#include "misc.h"
 #include "print-tree.h"
 
 int btrfs_delete_raid_extent(struct btrfs_trans_handle *trans, u64 start, u64 length)

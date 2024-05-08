@@ -74,10 +74,7 @@ void dc_dmub_srv_wait_idle(struct dc_dmub_srv *dc_dmub_srv)
 	struct dc_context *dc_ctx = dc_dmub_srv->ctx;
 	enum dmub_status status;
 
-	do {
-		status = dmub_srv_wait_for_idle(dmub, 100000);
-	} while (dc_dmub_srv->ctx->dc->debug.disable_timeout && status != DMUB_STATUS_OK);
-
+	status = dmub_srv_wait_for_idle(dmub, 100000);
 	if (status != DMUB_STATUS_OK) {
 		DC_ERROR("Error waiting for DMUB idle: status=%d\n", status);
 		dc_dmub_srv_log_diagnostic_data(dc_dmub_srv);
@@ -128,7 +125,7 @@ bool dc_dmub_srv_cmd_list_queue_execute(struct dc_dmub_srv *dc_dmub_srv,
 		unsigned int count,
 		union dmub_rb_cmd *cmd_list)
 {
-	struct dc_context *dc_ctx;
+	struct dc_context *dc_ctx = dc_dmub_srv->ctx;
 	struct dmub_srv *dmub;
 	enum dmub_status status;
 	int i;
@@ -136,7 +133,6 @@ bool dc_dmub_srv_cmd_list_queue_execute(struct dc_dmub_srv *dc_dmub_srv,
 	if (!dc_dmub_srv || !dc_dmub_srv->dmub)
 		return false;
 
-	dc_ctx = dc_dmub_srv->ctx;
 	dmub = dc_dmub_srv->dmub;
 
 	for (i = 0 ; i < count; i++) {
@@ -149,9 +145,7 @@ bool dc_dmub_srv_cmd_list_queue_execute(struct dc_dmub_srv *dc_dmub_srv,
 			if (status == DMUB_STATUS_POWER_STATE_D3)
 				return false;
 
-			do {
-				status = dmub_srv_wait_for_idle(dmub, 100000);
-			} while (dc_dmub_srv->ctx->dc->debug.disable_timeout && status != DMUB_STATUS_OK);
+			dmub_srv_wait_for_idle(dmub, 100000);
 
 			/* Requeue the command. */
 			status = dmub_srv_cmd_queue(dmub, &cmd_list[i]);
@@ -192,9 +186,7 @@ bool dc_dmub_srv_wait_for_idle(struct dc_dmub_srv *dc_dmub_srv,
 
 	// Wait for DMUB to process command
 	if (wait_type != DM_DMUB_WAIT_TYPE_NO_WAIT) {
-		do {
-			status = dmub_srv_wait_for_idle(dmub, 100000);
-		} while (dc_dmub_srv->ctx->dc->debug.disable_timeout && status != DMUB_STATUS_OK);
+		status = dmub_srv_wait_for_idle(dmub, 100000);
 
 		if (status != DMUB_STATUS_OK) {
 			DC_LOG_DEBUG("No reply for DMUB command: status=%d\n", status);
@@ -788,22 +780,21 @@ static void populate_subvp_cmd_pipe_info(struct dc *dc,
 	} else if (subvp_pipe->next_odm_pipe) {
 		pipe_data->pipe_config.subvp_data.main_split_pipe_index = subvp_pipe->next_odm_pipe->pipe_idx;
 	} else {
-		pipe_data->pipe_config.subvp_data.main_split_pipe_index = 0xF;
+		pipe_data->pipe_config.subvp_data.main_split_pipe_index = 0;
 	}
 
 	// Find phantom pipe index based on phantom stream
 	for (j = 0; j < dc->res_pool->pipe_count; j++) {
 		struct pipe_ctx *phantom_pipe = &context->res_ctx.pipe_ctx[j];
 
-		if (resource_is_pipe_type(phantom_pipe, OTG_MASTER) &&
-				phantom_pipe->stream == dc_state_get_paired_subvp_stream(context, subvp_pipe->stream)) {
+		if (phantom_pipe->stream == dc_state_get_paired_subvp_stream(context, subvp_pipe->stream)) {
 			pipe_data->pipe_config.subvp_data.phantom_pipe_index = phantom_pipe->stream_res.tg->inst;
 			if (phantom_pipe->bottom_pipe) {
 				pipe_data->pipe_config.subvp_data.phantom_split_pipe_index = phantom_pipe->bottom_pipe->plane_res.hubp->inst;
 			} else if (phantom_pipe->next_odm_pipe) {
 				pipe_data->pipe_config.subvp_data.phantom_split_pipe_index = phantom_pipe->next_odm_pipe->plane_res.hubp->inst;
 			} else {
-				pipe_data->pipe_config.subvp_data.phantom_split_pipe_index = 0xF;
+				pipe_data->pipe_config.subvp_data.phantom_split_pipe_index = 0;
 			}
 			break;
 		}
@@ -1170,7 +1161,7 @@ void dc_dmub_srv_subvp_save_surf_addr(const struct dc_dmub_srv *dc_dmub_srv, con
 
 bool dc_dmub_srv_is_hw_pwr_up(struct dc_dmub_srv *dc_dmub_srv, bool wait)
 {
-	struct dc_context *dc_ctx;
+	struct dc_context *dc_ctx = dc_dmub_srv->ctx;
 	enum dmub_status status;
 
 	if (!dc_dmub_srv || !dc_dmub_srv->dmub)
@@ -1178,8 +1169,6 @@ bool dc_dmub_srv_is_hw_pwr_up(struct dc_dmub_srv *dc_dmub_srv, bool wait)
 
 	if (dc_dmub_srv->ctx->dc->debug.dmcub_emulation)
 		return true;
-
-	dc_ctx = dc_dmub_srv->ctx;
 
 	if (wait) {
 		if (dc_dmub_srv->ctx->dc->debug.disable_timeout) {
@@ -1201,16 +1190,10 @@ bool dc_dmub_srv_is_hw_pwr_up(struct dc_dmub_srv *dc_dmub_srv, bool wait)
 
 static void dc_dmub_srv_notify_idle(const struct dc *dc, bool allow_idle)
 {
-	struct dc_dmub_srv *dc_dmub_srv;
 	union dmub_rb_cmd cmd = {0};
 
 	if (dc->debug.dmcub_emulation)
 		return;
-
-	if (!dc->ctx->dmub_srv || !dc->ctx->dmub_srv->dmub)
-		return;
-
-	dc_dmub_srv = dc->ctx->dmub_srv;
 
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.idle_opt_notify_idle.header.type = DMUB_CMD__IDLE_OPT;
@@ -1222,42 +1205,19 @@ static void dc_dmub_srv_notify_idle(const struct dc *dc, bool allow_idle)
 	cmd.idle_opt_notify_idle.cntl_data.driver_idle = allow_idle;
 
 	if (allow_idle) {
-		volatile struct dmub_shared_state_ips_driver *ips_driver =
-			&dc_dmub_srv->dmub->shared_state[DMUB_SHARED_SHARE_FEATURE__IPS_DRIVER].data.ips_driver;
-		union dmub_shared_state_ips_driver_signals new_signals;
-
-		dc_dmub_srv_wait_idle(dc->ctx->dmub_srv);
-
-		memset(&new_signals, 0, sizeof(new_signals));
-
-		if (dc->config.disable_ips == DMUB_IPS_ENABLE ||
-		    dc->config.disable_ips == DMUB_IPS_DISABLE_DYNAMIC) {
-			new_signals.bits.allow_pg = 1;
-			new_signals.bits.allow_ips1 = 1;
-			new_signals.bits.allow_ips2 = 1;
-			new_signals.bits.allow_z10 = 1;
-		} else if (dc->config.disable_ips == DMUB_IPS_DISABLE_IPS1) {
-			new_signals.bits.allow_ips1 = 1;
-		} else if (dc->config.disable_ips == DMUB_IPS_DISABLE_IPS2) {
-			new_signals.bits.allow_pg = 1;
-			new_signals.bits.allow_ips1 = 1;
-		} else if (dc->config.disable_ips == DMUB_IPS_DISABLE_IPS2_Z10) {
-			new_signals.bits.allow_pg = 1;
-			new_signals.bits.allow_ips1 = 1;
-			new_signals.bits.allow_ips2 = 1;
-		}
-
-		ips_driver->signals = new_signals;
+		if (dc->hwss.set_idle_state)
+			dc->hwss.set_idle_state(dc, true);
 	}
 
 	/* NOTE: This does not use the "wake" interface since this is part of the wake path. */
 	/* We also do not perform a wait since DMCUB could enter idle after the notification. */
-	dm_execute_dmub_cmd(dc->ctx, &cmd, allow_idle ? DM_DMUB_WAIT_TYPE_NO_WAIT : DM_DMUB_WAIT_TYPE_WAIT);
+	dm_execute_dmub_cmd(dc->ctx, &cmd, DM_DMUB_WAIT_TYPE_NO_WAIT);
 }
 
 static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 {
-	struct dc_dmub_srv *dc_dmub_srv;
+	uint32_t allow_state = 0;
+	uint32_t commit_state = 0;
 
 	if (dc->debug.dmcub_emulation)
 		return;
@@ -1265,44 +1225,61 @@ static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 	if (!dc->ctx->dmub_srv || !dc->ctx->dmub_srv->dmub)
 		return;
 
-	dc_dmub_srv = dc->ctx->dmub_srv;
+	if (dc->hwss.get_idle_state &&
+		dc->hwss.set_idle_state &&
+		dc->clk_mgr->funcs->exit_low_power_state) {
 
-	if (dc->clk_mgr->funcs->exit_low_power_state) {
-		volatile const struct dmub_shared_state_ips_fw *ips_fw =
-			&dc_dmub_srv->dmub->shared_state[DMUB_SHARED_SHARE_FEATURE__IPS_FW].data.ips_fw;
-		volatile struct dmub_shared_state_ips_driver *ips_driver =
-			&dc_dmub_srv->dmub->shared_state[DMUB_SHARED_SHARE_FEATURE__IPS_DRIVER].data.ips_driver;
-		union dmub_shared_state_ips_driver_signals prev_driver_signals = ips_driver->signals;
+		allow_state = dc->hwss.get_idle_state(dc);
+		dc->hwss.set_idle_state(dc, false);
 
-		ips_driver->signals.all = 0;
+		if (!(allow_state & DMUB_IPS2_ALLOW_MASK)) {
+			// Wait for evaluation time
+			for (;;) {
+				udelay(dc->debug.ips2_eval_delay_us);
+				commit_state = dc->hwss.get_idle_state(dc);
+				if (commit_state & DMUB_IPS2_ALLOW_MASK)
+					break;
 
-		if (prev_driver_signals.bits.allow_ips2) {
-			udelay(dc->debug.ips2_eval_delay_us);
+				/* allow was still set, retry eval delay */
+				dc->hwss.set_idle_state(dc, false);
+			}
 
-			if (ips_fw->signals.bits.ips2_commit) {
+			if (!(commit_state & DMUB_IPS2_COMMIT_MASK)) {
 				// Tell PMFW to exit low power state
 				dc->clk_mgr->funcs->exit_low_power_state(dc->clk_mgr);
 
 				// Wait for IPS2 entry upper bound
 				udelay(dc->debug.ips2_entry_delay_us);
-
 				dc->clk_mgr->funcs->exit_low_power_state(dc->clk_mgr);
 
-				while (ips_fw->signals.bits.ips2_commit)
+				for (;;) {
+					commit_state = dc->hwss.get_idle_state(dc);
+					if (commit_state & DMUB_IPS2_COMMIT_MASK)
+						break;
+
 					udelay(1);
+				}
 
 				if (!dc_dmub_srv_is_hw_pwr_up(dc->ctx->dmub_srv, true))
 					ASSERT(0);
 
-				dmub_srv_sync_inbox1(dc->ctx->dmub_srv->dmub);
+				/* TODO: See if we can return early here - IPS2 should go
+				 * back directly to IPS0 and clear the flags, but it will
+				 * be safer to directly notify DMCUB of this.
+				 */
+				allow_state = dc->hwss.get_idle_state(dc);
 			}
 		}
 
 		dc_dmub_srv_notify_idle(dc, false);
-		if (prev_driver_signals.bits.allow_ips1) {
-			while (ips_fw->signals.bits.ips1_commit)
-				udelay(1);
+		if (!(allow_state & DMUB_IPS1_ALLOW_MASK)) {
+			for (;;) {
+				commit_state = dc->hwss.get_idle_state(dc);
+				if (commit_state & DMUB_IPS1_COMMIT_MASK)
+					break;
 
+				udelay(1);
+			}
 		}
 	}
 
@@ -1384,7 +1361,7 @@ bool dc_wake_and_execute_dmub_cmd_list(const struct dc_context *ctx, unsigned in
 	else
 		result = dm_execute_dmub_cmd(ctx, cmd, wait_type);
 
-	if (result && reallow_idle && !ctx->dc->debug.disable_dmub_reallow_idle)
+	if (result && reallow_idle)
 		dc_dmub_srv_apply_idle_power_optimizations(ctx->dc, true);
 
 	return result;
@@ -1433,7 +1410,7 @@ bool dc_wake_and_execute_gpint(const struct dc_context *ctx, enum dmub_gpint_com
 
 	result = dc_dmub_execute_gpint(ctx, command_code, param, response, wait_type);
 
-	if (result && reallow_idle && !ctx->dc->debug.disable_dmub_reallow_idle)
+	if (result && reallow_idle)
 		dc_dmub_srv_apply_idle_power_optimizations(ctx->dc, true);
 
 	return result;

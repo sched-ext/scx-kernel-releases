@@ -259,5 +259,4 @@ static __exit void fake_remove_module(void)
 
 module_init(fakelb_init_module);
 module_exit(fake_remove_module);
-MODULE_DESCRIPTION("IEEE 802.15.4 loopback driver");
 MODULE_LICENSE("GPL");

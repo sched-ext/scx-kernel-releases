@@ -4,6 +4,7 @@
 
 #ifndef __ASSEMBLY__
 
+#include <asm/page.h>
 #include <asm/vdso/timebase.h>
 #include <asm/barrier.h>
 #include <asm/unistd.h>
@@ -94,7 +95,7 @@ const struct vdso_data *__arch_get_vdso_data(void);
 static __always_inline
 const struct vdso_data *__arch_get_timens_vdso_data(const struct vdso_data *vd)
 {
-	return (void *)vd + (1U << CONFIG_PAGE_SHIFT);
+	return (void *)vd + PAGE_SIZE;
 }
 #endif
 

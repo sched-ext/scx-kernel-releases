@@ -32,8 +32,7 @@ xfs_extent_busy_insert_list(
 	struct rb_node		**rbp;
 	struct rb_node		*parent = NULL;
 
-	new = kzalloc(sizeof(struct xfs_extent_busy),
-			GFP_KERNEL | __GFP_NOFAIL);
+	new = kmem_zalloc(sizeof(struct xfs_extent_busy), 0);
 	new->agno = pag->pag_agno;
 	new->bno = bno;
 	new->length = len;
@@ -531,7 +530,7 @@ xfs_extent_busy_clear_one(
 	}
 
 	list_del_init(&busyp->list);
-	kfree(busyp);
+	kmem_free(busyp);
 }
 
 static void

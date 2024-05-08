@@ -69,5 +69,4 @@ static struct platform_driver avs_probe_mb_driver = {
 
 module_platform_driver(avs_probe_mb_driver);
 
-MODULE_DESCRIPTION("Intel probe machine driver");
 MODULE_LICENSE("GPL");

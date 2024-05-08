@@ -176,14 +176,14 @@ static int proc_thermal_get_zone_temp(struct thermal_zone_device *zone,
 					 int *temp)
 {
 	int cpu;
-	int curr_temp, ret;
+	int curr_temp;
 
 	*temp = 0;
 
 	for_each_online_cpu(cpu) {
-		ret = intel_tcc_get_temp(cpu, &curr_temp, false);
-		if (ret < 0)
-			return ret;
+		curr_temp = intel_tcc_get_temp(cpu, false);
+		if (curr_temp < 0)
+			return curr_temp;
 		if (!*temp || curr_temp > *temp)
 			*temp = curr_temp;
 	}

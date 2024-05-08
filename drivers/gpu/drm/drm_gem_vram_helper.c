@@ -147,6 +147,7 @@ static void drm_gem_vram_placement(struct drm_gem_vram_object *gbo,
 		invariant_flags = TTM_PL_FLAG_TOPDOWN;
 
 	gbo->placement.placement = gbo->placements;
+	gbo->placement.busy_placement = gbo->placements;
 
 	if (pl_flag & DRM_GEM_VRAM_PL_FLAG_VRAM) {
 		gbo->placements[c].mem_type = TTM_PL_VRAM;
@@ -159,6 +160,7 @@ static void drm_gem_vram_placement(struct drm_gem_vram_object *gbo,
 	}
 
 	gbo->placement.num_placement = c;
+	gbo->placement.num_busy_placement = c;
 
 	for (i = 0; i < c; ++i) {
 		gbo->placements[i].fpfn = 0;
@@ -258,7 +260,8 @@ static u64 drm_gem_vram_pg_offset(struct drm_gem_vram_object *gbo)
 }
 
 /**
- * drm_gem_vram_offset() - Returns a GEM VRAM object's offset in video memory
+ * drm_gem_vram_offset() - \
+	Returns a GEM VRAM object's offset in video memory
  * @gbo:	the GEM VRAM object
  *
  * This function returns the buffer object's offset in the device's video
@@ -467,15 +470,14 @@ void drm_gem_vram_vunmap(struct drm_gem_vram_object *gbo,
 EXPORT_SYMBOL(drm_gem_vram_vunmap);
 
 /**
- * drm_gem_vram_fill_create_dumb() - Helper for implementing
- *				     &struct drm_driver.dumb_create
- *
+ * drm_gem_vram_fill_create_dumb() - \
+	Helper for implementing &struct drm_driver.dumb_create
  * @file:		the DRM file
  * @dev:		the DRM device
  * @pg_align:		the buffer's alignment in multiples of the page size
  * @pitch_align:	the scanline's alignment in powers of 2
- * @args:		the arguments as provided to
- *			&struct drm_driver.dumb_create
+ * @args:		the arguments as provided to \
+				&struct drm_driver.dumb_create
  *
  * This helper function fills &struct drm_mode_create_dumb, which is used
  * by &struct drm_driver.dumb_create. Implementations of this interface
@@ -573,7 +575,8 @@ static int drm_gem_vram_bo_driver_move(struct drm_gem_vram_object *gbo,
  */
 
 /**
- * drm_gem_vram_object_free() - Implements &struct drm_gem_object_funcs.free
+ * drm_gem_vram_object_free() - \
+	Implements &struct drm_gem_object_funcs.free
  * @gem:       GEM object. Refers to &struct drm_gem_vram_object.gem
  */
 static void drm_gem_vram_object_free(struct drm_gem_object *gem)
@@ -588,11 +591,12 @@ static void drm_gem_vram_object_free(struct drm_gem_object *gem)
  */
 
 /**
- * drm_gem_vram_driver_dumb_create() - Implements &struct drm_driver.dumb_create
+ * drm_gem_vram_driver_dumb_create() - \
+	Implements &struct drm_driver.dumb_create
  * @file:		the DRM file
  * @dev:		the DRM device
- * @args:		the arguments as provided to
- *			&struct drm_driver.dumb_create
+ * @args:		the arguments as provided to \
+				&struct drm_driver.dumb_create
  *
  * This function requires the driver to use @drm_device.vram_mm for its
  * instance of VRAM MM.
@@ -635,8 +639,8 @@ static void __drm_gem_vram_plane_helper_cleanup_fb(struct drm_plane *plane,
 }
 
 /**
- * drm_gem_vram_plane_helper_prepare_fb() - Implements &struct
- *					    drm_plane_helper_funcs.prepare_fb
+ * drm_gem_vram_plane_helper_prepare_fb() - \
+ *	Implements &struct drm_plane_helper_funcs.prepare_fb
  * @plane:	a DRM plane
  * @new_state:	the plane's new state
  *
@@ -686,8 +690,8 @@ err_drm_gem_vram_unpin:
 EXPORT_SYMBOL(drm_gem_vram_plane_helper_prepare_fb);
 
 /**
- * drm_gem_vram_plane_helper_cleanup_fb() - Implements &struct
- *					    drm_plane_helper_funcs.cleanup_fb
+ * drm_gem_vram_plane_helper_cleanup_fb() - \
+ *	Implements &struct drm_plane_helper_funcs.cleanup_fb
  * @plane:	a DRM plane
  * @old_state:	the plane's old state
  *
@@ -713,8 +717,8 @@ EXPORT_SYMBOL(drm_gem_vram_plane_helper_cleanup_fb);
  */
 
 /**
- * drm_gem_vram_simple_display_pipe_prepare_fb() - Implements &struct
- *				   drm_simple_display_pipe_funcs.prepare_fb
+ * drm_gem_vram_simple_display_pipe_prepare_fb() - \
+ *	Implements &struct drm_simple_display_pipe_funcs.prepare_fb
  * @pipe:	a simple display pipe
  * @new_state:	the plane's new state
  *
@@ -735,8 +739,8 @@ int drm_gem_vram_simple_display_pipe_prepare_fb(
 EXPORT_SYMBOL(drm_gem_vram_simple_display_pipe_prepare_fb);
 
 /**
- * drm_gem_vram_simple_display_pipe_cleanup_fb() - Implements &struct
- *						   drm_simple_display_pipe_funcs.cleanup_fb
+ * drm_gem_vram_simple_display_pipe_cleanup_fb() - \
+ *	Implements &struct drm_simple_display_pipe_funcs.cleanup_fb
  * @pipe:	a simple display pipe
  * @old_state:	the plane's old state
  *
@@ -757,7 +761,8 @@ EXPORT_SYMBOL(drm_gem_vram_simple_display_pipe_cleanup_fb);
  */
 
 /**
- * drm_gem_vram_object_pin() - Implements &struct drm_gem_object_funcs.pin
+ * drm_gem_vram_object_pin() - \
+	Implements &struct drm_gem_object_funcs.pin
  * @gem:	The GEM object to pin
  *
  * Returns:
@@ -780,7 +785,8 @@ static int drm_gem_vram_object_pin(struct drm_gem_object *gem)
 }
 
 /**
- * drm_gem_vram_object_unpin() - Implements &struct drm_gem_object_funcs.unpin
+ * drm_gem_vram_object_unpin() - \
+	Implements &struct drm_gem_object_funcs.unpin
  * @gem:	The GEM object to unpin
  */
 static void drm_gem_vram_object_unpin(struct drm_gem_object *gem)

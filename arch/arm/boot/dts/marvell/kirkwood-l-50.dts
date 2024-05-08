@@ -65,7 +65,6 @@
 			gpio2: gpio-expander@20 {
 				#gpio-cells = <2>;
 				#interrupt-cells = <2>;
-				interrupt-controller;
 				compatible = "semtech,sx1505q";
 				reg = <0x20>;
 
@@ -80,7 +79,6 @@
 			gpio3: gpio-expander@21 {
 				#gpio-cells = <2>;
 				#interrupt-cells = <2>;
-				interrupt-controller;
 				compatible = "semtech,sx1505q";
 				reg = <0x21>;
 

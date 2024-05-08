@@ -80,19 +80,13 @@ static void framebuffer_remove(struct coreboot_device *dev)
 	platform_device_unregister(pdev);
 }
 
-static const struct coreboot_device_id framebuffer_ids[] = {
-	{ .tag = CB_TAG_FRAMEBUFFER },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(coreboot, framebuffer_ids);
-
 static struct coreboot_driver framebuffer_driver = {
 	.probe = framebuffer_probe,
 	.remove = framebuffer_remove,
 	.drv = {
 		.name = "framebuffer",
 	},
-	.id_table = framebuffer_ids,
+	.tag = CB_TAG_FRAMEBUFFER,
 };
 module_coreboot_driver(framebuffer_driver);
 

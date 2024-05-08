@@ -14,10 +14,7 @@ YNL_GEN_ARG_ethtool:=--user-header linux/ethtool_netlink.h \
 
 TOOL:=../ynl-gen-c.py
 
-GENS_PATHS=$(shell grep -nrI --files-without-match \
-		'protocol: netlink' \
-		../../../../Documentation/netlink/specs/)
-GENS=$(patsubst ../../../../Documentation/netlink/specs/%.yaml,%,${GENS_PATHS})
+GENS:=ethtool devlink handshake fou netdev nfsd
 SRCS=$(patsubst %,%-user.c,${GENS})
 HDRS=$(patsubst %,%-user.h,${GENS})
 OBJS=$(patsubst %,%-user.o,${GENS})
@@ -43,11 +40,11 @@ protos.a: $(OBJS)
 clean:
 	rm -f *.o
 
-distclean: clean
+hardclean: clean
 	rm -f *.c *.h *.a
 
 regen:
 	@../ynl-regen.sh
 
-.PHONY: all clean distclean regen
+.PHONY: all clean hardclean regen
 .DEFAULT_GOAL: all

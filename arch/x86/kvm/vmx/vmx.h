@@ -15,7 +15,6 @@
 #include "vmx_ops.h"
 #include "../cpuid.h"
 #include "run_flags.h"
-#include "../mmu.h"
 
 #define MSR_TYPE_R	1
 #define MSR_TYPE_W	2
@@ -109,8 +108,6 @@ struct lbr_desc {
 	/* True if LBRs are marked as not intercepted in the MSR bitmap */
 	bool msr_passthrough;
 };
-
-extern struct x86_pmu_lbr vmx_lbr_caps;
 
 /*
  * The nested_vmx structure is part of vcpu_vmx, and holds information we need
@@ -334,6 +331,8 @@ struct vcpu_vmx {
 	/* Dynamic PLE window. */
 	unsigned int ple_window;
 	bool ple_window_dirty;
+
+	bool req_immediate_exit;
 
 	/* Support for PML */
 #define PML_ENTITY_NUM		512
@@ -722,8 +721,7 @@ static inline bool vmx_need_pf_intercept(struct kvm_vcpu *vcpu)
 	if (!enable_ept)
 		return true;
 
-	return allow_smaller_maxphyaddr &&
-	       cpuid_maxphyaddr(vcpu) < kvm_get_shadow_phys_bits();
+	return allow_smaller_maxphyaddr && cpuid_maxphyaddr(vcpu) < boot_cpu_data.x86_phys_bits;
 }
 
 static inline bool is_unrestricted_guest(struct kvm_vcpu *vcpu)

@@ -107,7 +107,7 @@ patternProperties:
         properties:
           sound-dai:
             minItems: 1
-            maxItems: 8
+            maxItems: 4
 
     required:
       - link-name

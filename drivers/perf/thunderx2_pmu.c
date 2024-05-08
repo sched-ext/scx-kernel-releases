@@ -993,7 +993,7 @@ static int tx2_uncore_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static void tx2_uncore_remove(struct platform_device *pdev)
+static int tx2_uncore_remove(struct platform_device *pdev)
 {
 	struct tx2_uncore_pmu *tx2_pmu, *temp;
 	struct device *dev = &pdev->dev;
@@ -1009,6 +1009,7 @@ static void tx2_uncore_remove(struct platform_device *pdev)
 			}
 		}
 	}
+	return 0;
 }
 
 static struct platform_driver tx2_uncore_driver = {
@@ -1018,7 +1019,7 @@ static struct platform_driver tx2_uncore_driver = {
 		.suppress_bind_attrs = true,
 	},
 	.probe = tx2_uncore_probe,
-	.remove_new = tx2_uncore_remove,
+	.remove = tx2_uncore_remove,
 };
 
 static int __init tx2_uncore_driver_init(void)

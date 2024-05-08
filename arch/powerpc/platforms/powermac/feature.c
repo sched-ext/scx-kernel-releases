@@ -2333,6 +2333,7 @@ static struct pmac_mb_def pmac_mb_defs[] = {
 		PMAC_TYPE_POWERMAC_G5,		g5_features,
 		0,
 	},
+#ifdef CONFIG_PPC64
 	{	"PowerMac7,3",			"PowerMac G5",
 		PMAC_TYPE_POWERMAC_G5,		g5_features,
 		0,
@@ -2357,6 +2358,7 @@ static struct pmac_mb_def pmac_mb_defs[] = {
 		PMAC_TYPE_XSERVE_G5,		g5_features,
 		0,
 	},
+#endif /* CONFIG_PPC64 */
 #endif /* CONFIG_PPC64 */
 };
 

@@ -812,15 +812,15 @@ op_remap(struct drm_gpuva_op_remap *r,
 	struct drm_gpuva_op_unmap *u = r->unmap;
 	struct nouveau_uvma *uvma = uvma_from_va(u->va);
 	u64 addr = uvma->va.va.addr;
-	u64 end = uvma->va.va.addr + uvma->va.va.range;
+	u64 range = uvma->va.va.range;
 
 	if (r->prev)
 		addr = r->prev->va.addr + r->prev->va.range;
 
 	if (r->next)
-		end = r->next->va.addr;
+		range = r->next->va.addr - addr;
 
-	op_unmap_range(u, addr, end - addr);
+	op_unmap_range(u, addr, range);
 }
 
 static int
@@ -1740,7 +1740,7 @@ nouveau_uvmm_ioctl_vm_bind(struct drm_device *dev,
 	if (ret)
 		return ret;
 
-	args.sched = cli->sched;
+	args.sched = &cli->sched;
 	args.file_priv = file_priv;
 
 	ret = nouveau_uvmm_vm_bind(&args);

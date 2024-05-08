@@ -320,13 +320,13 @@ devm_regulator_get_exclusive(struct device *dev, const char *id)
 
 static inline int devm_regulator_get_enable(struct device *dev, const char *id)
 {
-	return 0;
+	return -ENODEV;
 }
 
 static inline int devm_regulator_get_enable_optional(struct device *dev,
 						     const char *id)
 {
-	return 0;
+	return -ENODEV;
 }
 
 static inline struct regulator *__must_check

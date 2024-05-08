@@ -199,7 +199,6 @@ static void owl_uart_receive_chars(struct uart_port *port)
 	stat = owl_uart_read(port, OWL_UART_STAT);
 	while (!(stat & OWL_UART_STAT_RFEM)) {
 		char flag = TTY_NORMAL;
-		bool sysrq;
 
 		if (stat & OWL_UART_STAT_RXER)
 			port->icount.overrun++;
@@ -218,9 +217,7 @@ static void owl_uart_receive_chars(struct uart_port *port)
 		val = owl_uart_read(port, OWL_UART_RXDAT);
 		val &= 0xff;
 
-		sysrq = uart_prepare_sysrq_char(port, val);
-
-		if (!sysrq && (stat & port->ignore_status_mask) == 0)
+		if ((stat & port->ignore_status_mask) == 0)
 			tty_insert_flip_char(&port->state->port, val, flag);
 
 		stat = owl_uart_read(port, OWL_UART_STAT);
@@ -232,9 +229,10 @@ static void owl_uart_receive_chars(struct uart_port *port)
 static irqreturn_t owl_uart_irq(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
+	unsigned long flags;
 	u32 stat;
 
-	uart_port_lock(port);
+	uart_port_lock_irqsave(port, &flags);
 
 	stat = owl_uart_read(port, OWL_UART_STAT);
 
@@ -248,7 +246,7 @@ static irqreturn_t owl_uart_irq(int irq, void *dev_id)
 	stat |= OWL_UART_STAT_RIP | OWL_UART_STAT_TIP;
 	owl_uart_write(port, stat, OWL_UART_STAT);
 
-	uart_unlock_and_check_sysrq(port);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return IRQ_HANDLED;
 }
@@ -510,12 +508,18 @@ static void owl_uart_port_write(struct uart_port *port, const char *s,
 {
 	u32 old_ctl, val;
 	unsigned long flags;
-	int locked = 1;
+	int locked;
 
-	if (oops_in_progress)
-		locked = uart_port_trylock_irqsave(port, &flags);
-	else
-		uart_port_lock_irqsave(port, &flags);
+	local_irq_save(flags);
+
+	if (port->sysrq)
+		locked = 0;
+	else if (oops_in_progress)
+		locked = uart_port_trylock(port);
+	else {
+		uart_port_lock(port);
+		locked = 1;
+	}
 
 	old_ctl = owl_uart_read(port, OWL_UART_CTL);
 	val = old_ctl | OWL_UART_CTL_TRFS_TX;
@@ -537,7 +541,9 @@ static void owl_uart_port_write(struct uart_port *port, const char *s,
 	owl_uart_write(port, old_ctl, OWL_UART_CTL);
 
 	if (locked)
-		uart_port_unlock_irqrestore(port, flags);
+		uart_port_unlock(port);
+
+	local_irq_restore(flags);
 }
 
 static void owl_uart_console_write(struct console *co, const char *s,

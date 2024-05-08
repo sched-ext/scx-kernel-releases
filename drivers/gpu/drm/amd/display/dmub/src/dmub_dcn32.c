@@ -32,6 +32,8 @@
 #include "dcn/dcn_3_2_0_offset.h"
 #include "dcn/dcn_3_2_0_sh_mask.h"
 
+#define DCN_BASE__INST0_SEG2                       0x000034C0
+
 #define BASE_INNER(seg) ctx->dcn_reg_offsets[seg]
 #define CTX dmub
 #define REGS dmub->regs_dcn32
@@ -216,8 +218,7 @@ void dmub_dcn32_setup_windows(struct dmub_srv *dmub,
 		const struct dmub_window *cw3,
 		const struct dmub_window *cw4,
 		const struct dmub_window *cw5,
-		const struct dmub_window *cw6,
-		const struct dmub_window *region6)
+		const struct dmub_window *cw6)
 {
 	union dmub_addr offset;
 

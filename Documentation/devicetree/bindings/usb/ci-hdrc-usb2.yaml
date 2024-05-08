@@ -313,7 +313,7 @@ properties:
 
   usb-phy:
     description: phandle for the PHY device. Use "phys" instead.
-    maxItems: 1
+    $ref: /schemas/types.yaml#/definitions/phandle
     deprecated: true
 
   fsl,usbphy:

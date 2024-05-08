@@ -15,7 +15,6 @@
 #include <linux/swapops.h>
 #include <linux/init.h>
 #include <linux/pagemap.h>
-#include <linux/pagevec.h>
 #include <linux/backing-dev.h>
 #include <linux/blkdev.h>
 #include <linux/migrate.h>
@@ -283,8 +282,10 @@ void clear_shadow_from_swap_cache(int type, unsigned long begin,
  * folio_free_swap() _with_ the lock.
  * 					- Marcelo
  */
-void free_swap_cache(struct folio *folio)
+void free_swap_cache(struct page *page)
 {
+	struct folio *folio = page_folio(page);
+
 	if (folio_test_swapcache(folio) && !folio_mapped(folio) &&
 	    folio_trylock(folio)) {
 		folio_free_swap(folio);
@@ -298,11 +299,9 @@ void free_swap_cache(struct folio *folio)
  */
 void free_page_and_swap_cache(struct page *page)
 {
-	struct folio *folio = page_folio(page);
-
-	free_swap_cache(folio);
+	free_swap_cache(page);
 	if (!is_huge_zero_page(page))
-		folio_put(folio);
+		put_page(page);
 }
 
 /*
@@ -311,25 +310,10 @@ void free_page_and_swap_cache(struct page *page)
  */
 void free_pages_and_swap_cache(struct encoded_page **pages, int nr)
 {
-	struct folio_batch folios;
-	unsigned int refs[PAGEVEC_SIZE];
-
 	lru_add_drain();
-	folio_batch_init(&folios);
-	for (int i = 0; i < nr; i++) {
-		struct folio *folio = page_folio(encoded_page_ptr(pages[i]));
-
-		free_swap_cache(folio);
-		refs[folios.nr] = 1;
-		if (unlikely(encoded_page_flags(pages[i]) &
-			     ENCODED_PAGE_BIT_NR_PAGES_NEXT))
-			refs[folios.nr] = encoded_nr_pages(pages[++i]);
-
-		if (folio_batch_add(&folios, folio) == 0)
-			folios_put_refs(&folios, refs);
-	}
-	if (folios.nr)
-		folios_put_refs(&folios, refs);
+	for (int i = 0; i < nr; i++)
+		free_swap_cache(encoded_page_ptr(pages[i]));
+	release_pages(pages, nr);
 }
 
 static inline bool swap_use_vma_readahead(void)
@@ -696,10 +680,9 @@ skip:
 	/* The page was likely read above, so no need for plugging here */
 	folio = __read_swap_cache_async(entry, gfp_mask, mpol, ilx,
 					&page_allocated, false);
-	if (unlikely(page_allocated)) {
-		zswap_folio_swapin(folio);
+	if (unlikely(page_allocated))
 		swap_read_folio(folio, false, NULL);
-	}
+	zswap_folio_swapin(folio);
 	return folio;
 }
 
@@ -872,10 +855,9 @@ skip:
 	/* The folio was likely read above, so no need for plugging here */
 	folio = __read_swap_cache_async(targ_entry, gfp_mask, mpol, targ_ilx,
 					&page_allocated, false);
-	if (unlikely(page_allocated)) {
-		zswap_folio_swapin(folio);
+	if (unlikely(page_allocated))
 		swap_read_folio(folio, false, NULL);
-	}
+	zswap_folio_swapin(folio);
 	return folio;
 }
 

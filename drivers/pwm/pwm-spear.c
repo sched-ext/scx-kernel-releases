@@ -48,15 +48,17 @@
  *
  * @mmio_base: base address of pwm chip
  * @clk: pointer to clk structure of pwm chip
+ * @chip: linux pwm chip representation
  */
 struct spear_pwm_chip {
 	void __iomem *mmio_base;
 	struct clk *clk;
+	struct pwm_chip chip;
 };
 
 static inline struct spear_pwm_chip *to_spear_pwm_chip(struct pwm_chip *chip)
 {
-	return pwmchip_get_drvdata(chip);
+	return container_of(chip, struct spear_pwm_chip, chip);
 }
 
 static inline u32 spear_pwm_readl(struct spear_pwm_chip *chip, unsigned int num,
@@ -192,15 +194,13 @@ static const struct pwm_ops spear_pwm_ops = {
 static int spear_pwm_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct pwm_chip *chip;
 	struct spear_pwm_chip *pc;
 	int ret;
 	u32 val;
 
-	chip = devm_pwmchip_alloc(&pdev->dev, NUM_PWM, sizeof(*pc));
-	if (IS_ERR(chip))
-		return PTR_ERR(chip);
-	pc = to_spear_pwm_chip(chip);
+	pc = devm_kzalloc(&pdev->dev, sizeof(*pc), GFP_KERNEL);
+	if (!pc)
+		return -ENOMEM;
 
 	pc->mmio_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pc->mmio_base))
@@ -211,7 +211,9 @@ static int spear_pwm_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, PTR_ERR(pc->clk),
 				     "Failed to get clock\n");
 
-	chip->ops = &spear_pwm_ops;
+	pc->chip.dev = &pdev->dev;
+	pc->chip.ops = &spear_pwm_ops;
+	pc->chip.npwm = NUM_PWM;
 
 	if (of_device_is_compatible(np, "st,spear1340-pwm")) {
 		ret = clk_enable(pc->clk);
@@ -230,7 +232,7 @@ static int spear_pwm_probe(struct platform_device *pdev)
 		clk_disable(pc->clk);
 	}
 
-	ret = devm_pwmchip_add(&pdev->dev, chip);
+	ret = devm_pwmchip_add(&pdev->dev, &pc->chip);
 	if (ret < 0)
 		return dev_err_probe(&pdev->dev, ret, "pwmchip_add() failed\n");
 

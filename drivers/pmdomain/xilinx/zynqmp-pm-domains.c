@@ -210,7 +210,7 @@ static void zynqmp_gpd_detach_dev(struct generic_pm_domain *domain,
 }
 
 static struct generic_pm_domain *zynqmp_gpd_xlate
-				(const struct of_phandle_args *genpdspec, void *data)
+				(struct of_phandle_args *genpdspec, void *data)
 {
 	struct genpd_onecell_data *genpd_data = data;
 	unsigned int i, idx = genpdspec->args[0];

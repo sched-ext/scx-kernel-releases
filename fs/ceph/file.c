@@ -1138,12 +1138,7 @@ ssize_t __ceph_sync_read(struct inode *inode, loff_t *ki_pos,
 		}
 
 		idx = 0;
-		if (ret <= 0)
-			left = 0;
-		else if (off + ret > i_size)
-			left = i_size - off;
-		else
-			left = ret;
+		left = ret > 0 ? ret : 0;
 		while (left > 0) {
 			size_t plen, copied;
 
@@ -1172,13 +1167,15 @@ ssize_t __ceph_sync_read(struct inode *inode, loff_t *ki_pos,
 	}
 
 	if (ret > 0) {
-		if (off >= i_size) {
-			*retry_op = CHECK_EOF;
-			ret = i_size - *ki_pos;
-			*ki_pos = i_size;
-		} else {
-			ret = off - *ki_pos;
-			*ki_pos = off;
+		if (off > *ki_pos) {
+			if (off >= i_size) {
+				*retry_op = CHECK_EOF;
+				ret = i_size - *ki_pos;
+				*ki_pos = i_size;
+			} else {
+				ret = off - *ki_pos;
+				*ki_pos = off;
+			}
 		}
 
 		if (last_objver)
@@ -2129,16 +2126,14 @@ again:
 		int statret;
 		struct page *page = NULL;
 		loff_t i_size;
-		int mask = CEPH_STAT_CAP_SIZE;
 		if (retry_op == READ_INLINE) {
 			page = __page_cache_alloc(GFP_KERNEL);
 			if (!page)
 				return -ENOMEM;
-
-			mask = CEPH_STAT_CAP_INLINE_DATA;
 		}
 
-		statret = __ceph_do_getattr(inode, page, mask, !!page);
+		statret = __ceph_do_getattr(inode, page,
+					    CEPH_STAT_CAP_INLINE_DATA, !!page);
 		if (statret < 0) {
 			if (page)
 				__free_page(page);
@@ -2179,7 +2174,7 @@ again:
 		/* hit EOF or hole? */
 		if (retry_op == CHECK_EOF && iocb->ki_pos < i_size &&
 		    ret < len) {
-			doutc(cl, "may hit hole, ppos %lld < size %lld, reading more\n",
+			doutc(cl, "hit hole, ppos %lld < size %lld, reading more\n",
 			      iocb->ki_pos, i_size);
 
 			read += ret;

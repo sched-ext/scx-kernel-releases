@@ -325,7 +325,9 @@ EXPORT_SYMBOL_GPL(backing_file_mmap);
 
 static int __init backing_aio_init(void)
 {
-	backing_aio_cachep = KMEM_CACHE(backing_aio, SLAB_HWCACHE_ALIGN);
+	backing_aio_cachep = kmem_cache_create("backing_aio",
+					       sizeof(struct backing_aio),
+					       0, SLAB_HWCACHE_ALIGN, NULL);
 	if (!backing_aio_cachep)
 		return -ENOMEM;
 

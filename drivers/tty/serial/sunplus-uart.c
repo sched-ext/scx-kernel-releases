@@ -260,7 +260,7 @@ static void receive_chars(struct uart_port *port)
 		if (port->ignore_status_mask & SUP_DUMMY_READ)
 			goto ignore_char;
 
-		if (uart_prepare_sysrq_char(port, ch))
+		if (uart_handle_sysrq_char(port, ch))
 			goto ignore_char;
 
 		uart_insert_char(port, lsr, SUP_UART_LSR_OE, ch, flag);
@@ -287,7 +287,7 @@ static irqreturn_t sunplus_uart_irq(int irq, void *args)
 	if (isc & SUP_UART_ISC_TX)
 		transmit_chars(port);
 
-	uart_unlock_and_check_sysrq(port);
+	uart_port_unlock(port);
 
 	return IRQ_HANDLED;
 }
@@ -512,16 +512,22 @@ static void sunplus_console_write(struct console *co,
 	unsigned long flags;
 	int locked = 1;
 
-	if (oops_in_progress)
-		locked = uart_port_trylock_irqsave(&sunplus_console_ports[co->index]->port, &flags);
+	local_irq_save(flags);
+
+	if (sunplus_console_ports[co->index]->port.sysrq)
+		locked = 0;
+	else if (oops_in_progress)
+		locked = uart_port_trylock(&sunplus_console_ports[co->index]->port);
 	else
-		uart_port_lock_irqsave(&sunplus_console_ports[co->index]->port, &flags);
+		uart_port_lock(&sunplus_console_ports[co->index]->port);
 
 	uart_console_write(&sunplus_console_ports[co->index]->port, s, count,
 			   sunplus_uart_console_putchar);
 
 	if (locked)
-		uart_port_unlock_irqrestore(&sunplus_console_ports[co->index]->port, flags);
+		uart_port_unlock(&sunplus_console_ports[co->index]->port);
+
+	local_irq_restore(flags);
 }
 
 static int __init sunplus_console_setup(struct console *co, char *options)

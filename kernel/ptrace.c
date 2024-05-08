@@ -375,13 +375,10 @@ static int check_ptrace_options(unsigned long data)
 	return 0;
 }
 
-static inline void ptrace_set_stopped(struct task_struct *task, bool seize)
+static inline void ptrace_set_stopped(struct task_struct *task)
 {
 	guard(spinlock)(&task->sighand->siglock);
 
-	/* SEIZE doesn't trap tracee on attach */
-	if (!seize)
-		send_signal_locked(SIGSTOP, SEND_SIG_PRIV, task, PIDTYPE_PID);
 	/*
 	 * If the task is already STOPPED, set JOBCTL_TRAP_STOP and
 	 * TRAPPING, and kick it so that it transits to TRACED.  TRAPPING
@@ -460,8 +457,14 @@ static int ptrace_attach(struct task_struct *task, long request,
 				return -EPERM;
 
 			task->ptrace = flags;
+
 			ptrace_link(task, current);
-			ptrace_set_stopped(task, seize);
+
+			/* SEIZE doesn't trap tracee on attach */
+			if (!seize)
+				send_sig_info(SIGSTOP, SEND_SIG_PRIV, task);
+
+			ptrace_set_stopped(task);
 		}
 	}
 

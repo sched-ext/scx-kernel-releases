@@ -24,7 +24,6 @@
 
 #include <linux/memblock.h>
 #include <linux/init.h>
-#include <asm/pgtable_areas.h>
 
 #include "numa_internal.h"
 

@@ -16,7 +16,6 @@
 #include "xe_heci_gsc.h"
 #include "xe_gt_types.h"
 #include "xe_lmtt_types.h"
-#include "xe_memirq_types.h"
 #include "xe_platform_types.h"
 #include "xe_pt_types.h"
 #include "xe_sriov_types.h"
@@ -143,10 +142,10 @@ struct xe_tile {
 	 * * 8MB-16MB: global GTT
 	 */
 	struct {
-		/** @mmio.size: size of tile's MMIO space */
+		/** @size: size of tile's MMIO space */
 		size_t size;
 
-		/** @mmio.regs: pointer to tile's MMIO space (starting with registers) */
+		/** @regs: pointer to tile's MMIO space (starting with registers) */
 		void __iomem *regs;
 	} mmio;
 
@@ -156,31 +155,31 @@ struct xe_tile {
 	 * Each tile has its own additional 256MB (28-bit) MMIO-extension space.
 	 */
 	struct {
-		/** @mmio_ext.size: size of tile's additional MMIO-extension space */
+		/** @size: size of tile's additional MMIO-extension space */
 		size_t size;
 
-		/** @mmio_ext.regs: pointer to tile's additional MMIO-extension space */
+		/** @regs: pointer to tile's additional MMIO-extension space */
 		void __iomem *regs;
 	} mmio_ext;
 
 	/** @mem: memory management info for tile */
 	struct {
 		/**
-		 * @mem.vram: VRAM info for tile.
+		 * @vram: VRAM info for tile.
 		 *
 		 * Although VRAM is associated with a specific tile, it can
 		 * still be accessed by all tiles' GTs.
 		 */
 		struct xe_mem_region vram;
 
-		/** @mem.vram_mgr: VRAM TTM manager */
+		/** @vram_mgr: VRAM TTM manager */
 		struct xe_ttm_vram_mgr *vram_mgr;
 
-		/** @mem.ggtt: Global graphics translation table */
+		/** @ggtt: Global graphics translation table */
 		struct xe_ggtt *ggtt;
 
 		/**
-		 * @mem.kernel_bb_pool: Pool from which batchbuffers are allocated.
+		 * @kernel_bb_pool: Pool from which batchbuffers are allocated.
 		 *
 		 * Media GT shares a pool with its primary GT.
 		 */
@@ -193,10 +192,6 @@ struct xe_tile {
 			/** @sriov.pf.lmtt: Local Memory Translation Table. */
 			struct xe_lmtt lmtt;
 		} pf;
-		struct {
-			/** @sriov.vf.memirq: Memory Based Interrupts. */
-			struct xe_memirq memirq;
-		} vf;
 	} sriov;
 
 	/** @migrate: Migration helper for vram blits and clearing */
@@ -218,68 +213,68 @@ struct xe_device {
 
 	/** @info: device info */
 	struct intel_device_info {
-		/** @info.graphics_name: graphics IP name */
+		/** @graphics_name: graphics IP name */
 		const char *graphics_name;
-		/** @info.media_name: media IP name */
+		/** @media_name: media IP name */
 		const char *media_name;
-		/** @info.tile_mmio_ext_size: size of MMIO extension space, per-tile */
+		/** @tile_mmio_ext_size: size of MMIO extension space, per-tile */
 		u32 tile_mmio_ext_size;
-		/** @info.graphics_verx100: graphics IP version */
+		/** @graphics_verx100: graphics IP version */
 		u32 graphics_verx100;
-		/** @info.media_verx100: media IP version */
+		/** @media_verx100: media IP version */
 		u32 media_verx100;
-		/** @info.mem_region_mask: mask of valid memory regions */
+		/** @mem_region_mask: mask of valid memory regions */
 		u32 mem_region_mask;
-		/** @info.platform: XE platform enum */
+		/** @platform: XE platform enum */
 		enum xe_platform platform;
-		/** @info.subplatform: XE subplatform enum */
+		/** @subplatform: XE subplatform enum */
 		enum xe_subplatform subplatform;
-		/** @info.devid: device ID */
+		/** @devid: device ID */
 		u16 devid;
-		/** @info.revid: device revision */
+		/** @revid: device revision */
 		u8 revid;
-		/** @info.step: stepping information for each IP */
+		/** @step: stepping information for each IP */
 		struct xe_step_info step;
-		/** @info.dma_mask_size: DMA address bits */
+		/** @dma_mask_size: DMA address bits */
 		u8 dma_mask_size;
-		/** @info.vram_flags: Vram flags */
+		/** @vram_flags: Vram flags */
 		u8 vram_flags;
-		/** @info.tile_count: Number of tiles */
+		/** @tile_count: Number of tiles */
 		u8 tile_count;
-		/** @info.gt_count: Total number of GTs for entire device */
+		/** @gt_count: Total number of GTs for entire device */
 		u8 gt_count;
-		/** @info.vm_max_level: Max VM level */
+		/** @vm_max_level: Max VM level */
 		u8 vm_max_level;
-		/** @info.va_bits: Maximum bits of a virtual address */
+		/** @va_bits: Maximum bits of a virtual address */
 		u8 va_bits;
 
-		/** @info.is_dgfx: is discrete device */
+		/** @is_dgfx: is discrete device */
 		u8 is_dgfx:1;
-		/** @info.has_asid: Has address space ID */
+		/** @has_asid: Has address space ID */
 		u8 has_asid:1;
-		/** @info.force_execlist: Forced execlist submission */
+		/** @force_execlist: Forced execlist submission */
 		u8 force_execlist:1;
-		/** @info.has_flat_ccs: Whether flat CCS metadata is used */
+		/** @has_flat_ccs: Whether flat CCS metadata is used */
 		u8 has_flat_ccs:1;
-		/** @info.has_llc: Device has a shared CPU+GPU last level cache */
+		/** @has_llc: Device has a shared CPU+GPU last level cache */
 		u8 has_llc:1;
-		/** @info.has_mmio_ext: Device has extra MMIO address range */
+		/** @has_mmio_ext: Device has extra MMIO address range */
 		u8 has_mmio_ext:1;
-		/** @info.has_range_tlb_invalidation: Has range based TLB invalidations */
+		/** @has_range_tlb_invalidation: Has range based TLB invalidations */
 		u8 has_range_tlb_invalidation:1;
-		/** @info.has_sriov: Supports SR-IOV */
+		/** @has_sriov: Supports SR-IOV */
 		u8 has_sriov:1;
-		/** @info.has_usm: Device has unified shared memory support */
+		/** @has_usm: Device has unified shared memory support */
 		u8 has_usm:1;
-		/** @info.enable_display: display enabled */
+		/** @enable_display: display enabled */
 		u8 enable_display:1;
-		/** @info.skip_mtcfg: skip Multi-Tile configuration from MTCFG register */
+		/** @skip_mtcfg: skip Multi-Tile configuration from MTCFG register */
 		u8 skip_mtcfg:1;
-		/** @info.skip_pcode: skip access to PCODE uC */
+		/** @skip_pcode: skip access to PCODE uC */
 		u8 skip_pcode:1;
-		/** @info.has_heci_gscfi: device has heci gscfi */
+		/** @has_heci_gscfi: device has heci gscfi */
 		u8 has_heci_gscfi:1;
-		/** @info.skip_guc_pc: Skip GuC based PM feature init */
+		/** @skip_guc_pc: Skip GuC based PM feature init */
 		u8 skip_guc_pc:1;
 
 #if IS_ENABLED(CONFIG_DRM_XE_DISPLAY)
@@ -291,10 +286,10 @@ struct xe_device {
 
 	/** @irq: device interrupt state */
 	struct {
-		/** @irq.lock: lock for processing irq's on this device */
+		/** @lock: lock for processing irq's on this device */
 		spinlock_t lock;
 
-		/** @irq.enabled: interrupts enabled on this device */
+		/** @enabled: interrupts enabled on this device */
 		bool enabled;
 	} irq;
 
@@ -303,17 +298,17 @@ struct xe_device {
 
 	/** @mmio: mmio info for device */
 	struct {
-		/** @mmio.size: size of MMIO space for device */
+		/** @size: size of MMIO space for device */
 		size_t size;
-		/** @mmio.regs: pointer to MMIO space for device */
+		/** @regs: pointer to MMIO space for device */
 		void __iomem *regs;
 	} mmio;
 
 	/** @mem: memory info for device */
 	struct {
-		/** @mem.vram: VRAM info for device */
+		/** @vram: VRAM info for device */
 		struct xe_mem_region vram;
-		/** @mem.sys_mgr: system TTM manager */
+		/** @sys_mgr: system TTM manager */
 		struct ttm_resource_manager sys_mgr;
 	} mem;
 
@@ -321,50 +316,53 @@ struct xe_device {
 	struct {
 		/** @sriov.__mode: SR-IOV mode (Don't access directly!) */
 		enum xe_sriov_mode __mode;
-		/** @sriov.wq: workqueue used by the virtualization workers */
-		struct workqueue_struct *wq;
 	} sriov;
 
 	/** @clients: drm clients info */
 	struct {
-		/** @clients.lock: Protects drm clients info */
+		/** @lock: Protects drm clients info */
 		spinlock_t lock;
 
-		/** @clients.count: number of drm clients */
+		/** @count: number of drm clients */
 		u64 count;
 	} clients;
 
 	/** @usm: unified memory state */
 	struct {
-		/** @usm.asid: convert a ASID to VM */
+		/** @asid: convert a ASID to VM */
 		struct xarray asid_to_vm;
-		/** @usm.next_asid: next ASID, used to cyclical alloc asids */
+		/** @next_asid: next ASID, used to cyclical alloc asids */
 		u32 next_asid;
-		/** @usm.num_vm_in_fault_mode: number of VM in fault mode */
+		/** @num_vm_in_fault_mode: number of VM in fault mode */
 		u32 num_vm_in_fault_mode;
-		/** @usm.num_vm_in_non_fault_mode: number of VM in non-fault mode */
+		/** @num_vm_in_non_fault_mode: number of VM in non-fault mode */
 		u32 num_vm_in_non_fault_mode;
-		/** @usm.lock: protects UM state */
+		/** @lock: protects UM state */
 		struct mutex lock;
 	} usm;
 
+	/** @persistent_engines: engines that are closed but still running */
+	struct {
+		/** @lock: protects persistent engines */
+		struct mutex lock;
+		/** @list: list of persistent engines */
+		struct list_head list;
+	} persistent_engines;
+
 	/** @pinned: pinned BO state */
 	struct {
-		/** @pinned.lock: protected pinned BO list state */
+		/** @lock: protected pinned BO list state */
 		spinlock_t lock;
-		/** @pinned.kernel_bo_present: pinned kernel BO that are present */
+		/** @evicted: pinned kernel BO that are present */
 		struct list_head kernel_bo_present;
-		/** @pinned.evicted: pinned BO that have been evicted */
+		/** @evicted: pinned BO that have been evicted */
 		struct list_head evicted;
-		/** @pinned.external_vram: pinned external BO in vram*/
+		/** @external_vram: pinned external BO in vram*/
 		struct list_head external_vram;
 	} pinned;
 
 	/** @ufence_wq: user fence wait queue */
 	wait_queue_head_t ufence_wq;
-
-	/** @preempt_fence_wq: used to serialize preempt fences */
-	struct workqueue_struct *preempt_fence_wq;
 
 	/** @ordered_wq: used to serialize compute mode resume */
 	struct workqueue_struct *ordered_wq;
@@ -380,57 +378,36 @@ struct xe_device {
 	 * triggering additional actions when they occur.
 	 */
 	struct {
-		/** @mem_access.ref: ref count of memory accesses */
+		/** @ref: ref count of memory accesses */
 		atomic_t ref;
-
-		/**
-		 * @mem_access.vram_userfault: Encapsulate vram_userfault
-		 * related stuff
-		 */
-		struct {
-			/**
-			 * @mem_access.vram_userfault.lock: Protects access to
-			 * @vram_usefault.list Using mutex instead of spinlock
-			 * as lock is applied to entire list operation which
-			 * may sleep
-			 */
-			struct mutex lock;
-
-			/**
-			 * @mem_access.vram_userfault.list: Keep list of userfaulted
-			 * vram bo, which require to release their mmap mappings
-			 * at runtime suspend path
-			 */
-			struct list_head list;
-		} vram_userfault;
 	} mem_access;
 
 	/**
 	 * @pat: Encapsulate PAT related stuff
 	 */
 	struct {
-		/** @pat.ops: Internal operations to abstract platforms */
+		/** Internal operations to abstract platforms */
 		const struct xe_pat_ops *ops;
-		/** @pat.table: PAT table to program in the HW */
+		/** PAT table to program in the HW */
 		const struct xe_pat_table_entry *table;
-		/** @pat.n_entries: Number of PAT entries */
+		/** Number of PAT entries */
 		int n_entries;
 		u32 idx[__XE_CACHE_LEVEL_COUNT];
 	} pat;
 
 	/** @d3cold: Encapsulate d3cold related stuff */
 	struct {
-		/** @d3cold.capable: Indicates if root port is d3cold capable */
+		/** capable: Indicates if root port is d3cold capable */
 		bool capable;
 
-		/** @d3cold.allowed: Indicates if d3cold is a valid device state */
+		/** @allowed: Indicates if d3cold is a valid device state */
 		bool allowed;
 
-		/** @d3cold.power_lost: Indicates if card has really lost power. */
+		/** @power_lost: Indicates if card has really lost power. */
 		bool power_lost;
 
 		/**
-		 * @d3cold.vram_threshold:
+		 * @vram_threshold:
 		 *
 		 * This represents the permissible threshold(in megabytes)
 		 * for vram save/restore. d3cold will be disallowed,
@@ -439,7 +416,7 @@ struct xe_device {
 		 * Default threshold value is 300mb.
 		 */
 		u32 vram_threshold;
-		/** @d3cold.lock: protect vram_threshold */
+		/** @lock: protect vram_threshold */
 		struct mutex lock;
 	} d3cold;
 
@@ -547,17 +524,17 @@ struct xe_file {
 
 	/** @vm: VM state for file */
 	struct {
-		/** @vm.xe: xarray to store VMs */
+		/** @xe: xarray to store VMs */
 		struct xarray xa;
-		/** @vm.lock: protects file VM state */
+		/** @lock: protects file VM state */
 		struct mutex lock;
 	} vm;
 
 	/** @exec_queue: Submission exec queue state for file */
 	struct {
-		/** @exec_queue.xe: xarray to store engines */
+		/** @xe: xarray to store engines */
 		struct xarray xa;
-		/** @exec_queue.lock: protects file engine state */
+		/** @lock: protects file engine state */
 		struct mutex lock;
 	} exec_queue;
 

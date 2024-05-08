@@ -131,7 +131,6 @@ static struct wmi_driver intel_wmi_sbl_fw_update_driver = {
 	.probe = intel_wmi_sbl_fw_update_probe,
 	.remove = intel_wmi_sbl_fw_update_remove,
 	.id_table = intel_wmi_sbl_id_table,
-	.no_singleton = true,
 };
 module_wmi_driver(intel_wmi_sbl_fw_update_driver);
 

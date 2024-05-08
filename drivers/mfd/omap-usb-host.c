@@ -699,7 +699,7 @@ static int usbhs_omap_probe(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < omap->nports; i++) {
-		char clkname[40];
+		char clkname[30];
 
 		/* clock names are indexed from 1*/
 		snprintf(clkname, sizeof(clkname),

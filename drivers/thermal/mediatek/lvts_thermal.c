@@ -719,10 +719,8 @@ static int lvts_calibration_read(struct device *dev, struct lvts_domain *lvts_td
 
 		lvts_td->calib = devm_krealloc(dev, lvts_td->calib,
 					       lvts_td->calib_len + len, GFP_KERNEL);
-		if (!lvts_td->calib) {
-			kfree(efuse);
+		if (!lvts_td->calib)
 			return -ENOMEM;
-		}
 
 		memcpy(lvts_td->calib + lvts_td->calib_len, efuse, len);
 

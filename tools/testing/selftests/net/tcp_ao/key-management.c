@@ -417,9 +417,9 @@ struct test_key {
 		matches_vrf		: 1,
 		is_current		: 1,
 		is_rnext		: 1,
-		used_on_server_tx	: 1,
-		used_on_client_tx	: 1,
-		skip_counters_checks	: 1;
+		used_on_handshake	: 1,
+		used_after_accept	: 1,
+		used_on_client		: 1;
 };
 
 struct key_collection {
@@ -609,14 +609,16 @@ static int key_collection_socket(bool server, unsigned int port)
 				addr = &this_ip_dest;
 			sndid = key->client_keyid;
 			rcvid = key->server_keyid;
-			key->used_on_client_tx = set_current = key->is_current;
-			key->used_on_server_tx = set_rnext = key->is_rnext;
+			set_current = key->is_current;
+			set_rnext = key->is_rnext;
 		}
 
 		if (test_add_key_cr(sk, key->password, key->len,
 				    *addr, vrf, sndid, rcvid, key->maclen,
 				    key->alg, set_current, set_rnext))
 			test_key_error("setsockopt(TCP_AO_ADD_KEY)", key);
+		if (set_current || set_rnext)
+			key->used_on_handshake = 1;
 #ifdef DEBUG
 		test_print("%s [%u/%u] key: { %s, %u:%u, %u, %u:%u:%u:%u (%u)}",
 			   server ? "server" : "client", i, collection.nr_keys,
@@ -638,22 +640,22 @@ static void verify_counters(const char *tst_name, bool is_listen_sk, bool server
 	for (i = 0; i < collection.nr_keys; i++) {
 		struct test_key *key = &collection.keys[i];
 		uint8_t sndid, rcvid;
-		bool rx_cnt_expected;
+		bool was_used;
 
-		if (key->skip_counters_checks)
-			continue;
 		if (server) {
 			sndid = key->server_keyid;
 			rcvid = key->client_keyid;
-			rx_cnt_expected = key->used_on_client_tx;
+			if (is_listen_sk)
+				was_used = key->used_on_handshake;
+			else
+				was_used = key->used_after_accept;
 		} else {
 			sndid = key->client_keyid;
 			rcvid = key->server_keyid;
-			rx_cnt_expected = key->used_on_server_tx;
+			was_used = key->used_on_client;
 		}
 
-		test_tcp_ao_key_counters_cmp(tst_name, a, b,
-					     rx_cnt_expected ? TEST_CNT_KEY_GOOD : 0,
+		test_tcp_ao_key_counters_cmp(tst_name, a, b, was_used,
 					     sndid, rcvid);
 	}
 	test_tcp_ao_counters_free(a);
@@ -841,7 +843,7 @@ static void end_server(const char *tst_name, int sk,
 	synchronize_threads(); /* 4: verified => closed */
 	close(sk);
 
-	verify_counters(tst_name, false, true, begin, &end);
+	verify_counters(tst_name, true, false, begin, &end);
 	synchronize_threads(); /* 5: counters */
 }
 
@@ -914,8 +916,9 @@ static int run_client(const char *tst_name, unsigned int port,
 		current_index = nr_keys - 1;
 	if (rnext_index < 0)
 		rnext_index = nr_keys - 1;
-	collection.keys[current_index].used_on_client_tx = 1;
-	collection.keys[rnext_index].used_on_server_tx = 1;
+	collection.keys[current_index].used_on_handshake = 1;
+	collection.keys[rnext_index].used_after_accept = 1;
+	collection.keys[rnext_index].used_on_client = 1;
 
 	synchronize_threads(); /* 3: accepted => send data */
 	if (test_client_verify(sk, msg_sz, msg_nr, TEST_TIMEOUT_SEC)) {
@@ -1056,16 +1059,7 @@ static void check_current_back(const char *tst_name, unsigned int port,
 		test_error("Can't change the current key");
 	if (test_client_verify(sk, msg_len, nr_packets, TEST_TIMEOUT_SEC))
 		test_fail("verify failed");
-	/* There is a race here: between setting the current_key with
-	 * setsockopt(TCP_AO_INFO) and starting to send some data - there
-	 * might have been a segment received with the desired
-	 * RNext_key set. In turn that would mean that the first outgoing
-	 * segment will have the desired current_key (flipped back).
-	 * Which is what the user/test wants. As it's racy, skip checking
-	 * the counters, yet check what are the resulting current/rnext
-	 * keys on both sides.
-	 */
-	collection.keys[rotate_to_index].skip_counters_checks = 1;
+	collection.keys[rotate_to_index].used_after_accept = 1;
 
 	end_client(tst_name, sk, nr_keys, current_index, rnext_index, &tmp);
 }
@@ -1095,7 +1089,7 @@ static void roll_over_keys(const char *tst_name, unsigned int port,
 		}
 		verify_current_rnext(tst_name, sk, -1,
 				     collection.keys[i].server_keyid);
-		collection.keys[i].used_on_server_tx = 1;
+		collection.keys[i].used_on_client = 1;
 		synchronize_threads(); /* verify current/rnext */
 	}
 	end_client(tst_name, sk, nr_keys, current_index, rnext_index, &tmp);

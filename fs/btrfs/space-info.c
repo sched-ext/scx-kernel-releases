@@ -9,6 +9,7 @@
 #include "ordered-data.h"
 #include "transaction.h"
 #include "block-group.h"
+#include "zoned.h"
 #include "fs.h"
 #include "accessors.h"
 #include "extent-tree.h"
@@ -855,7 +856,7 @@ btrfs_calc_reclaim_metadata_size(struct btrfs_fs_info *fs_info,
 static bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 				    struct btrfs_space_info *space_info)
 {
-	const u64 global_rsv_size = btrfs_block_rsv_reserved(&fs_info->global_block_rsv);
+	u64 global_rsv_size = fs_info->global_block_rsv.reserved;
 	u64 ordered, delalloc;
 	u64 thresh;
 	u64 used;
@@ -955,8 +956,8 @@ static bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 	ordered = percpu_counter_read_positive(&fs_info->ordered_bytes) >> 1;
 	delalloc = percpu_counter_read_positive(&fs_info->delalloc_bytes);
 	if (ordered >= delalloc)
-		used += btrfs_block_rsv_reserved(&fs_info->delayed_refs_rsv) +
-			btrfs_block_rsv_reserved(&fs_info->delayed_block_rsv);
+		used += fs_info->delayed_refs_rsv.reserved +
+			fs_info->delayed_block_rsv.reserved;
 	else
 		used += space_info->bytes_may_use - global_rsv_size;
 
@@ -1172,7 +1173,7 @@ static void btrfs_preempt_reclaim_metadata_space(struct work_struct *work)
 		enum btrfs_flush_state flush;
 		u64 delalloc_size = 0;
 		u64 to_reclaim, block_rsv_size;
-		const u64 global_rsv_size = btrfs_block_rsv_reserved(global_rsv);
+		u64 global_rsv_size = global_rsv->reserved;
 
 		loops++;
 
@@ -1184,9 +1185,9 @@ static void btrfs_preempt_reclaim_metadata_space(struct work_struct *work)
 		 * assume it's tied up in delalloc reservations.
 		 */
 		block_rsv_size = global_rsv_size +
-			btrfs_block_rsv_reserved(delayed_block_rsv) +
-			btrfs_block_rsv_reserved(delayed_refs_rsv) +
-			btrfs_block_rsv_reserved(trans_rsv);
+			delayed_block_rsv->reserved +
+			delayed_refs_rsv->reserved +
+			trans_rsv->reserved;
 		if (block_rsv_size < space_info->bytes_may_use)
 			delalloc_size = space_info->bytes_may_use - block_rsv_size;
 
@@ -1206,16 +1207,16 @@ static void btrfs_preempt_reclaim_metadata_space(struct work_struct *work)
 			to_reclaim = delalloc_size;
 			flush = FLUSH_DELALLOC;
 		} else if (space_info->bytes_pinned >
-			   (btrfs_block_rsv_reserved(delayed_block_rsv) +
-			    btrfs_block_rsv_reserved(delayed_refs_rsv))) {
+			   (delayed_block_rsv->reserved +
+			    delayed_refs_rsv->reserved)) {
 			to_reclaim = space_info->bytes_pinned;
 			flush = COMMIT_TRANS;
-		} else if (btrfs_block_rsv_reserved(delayed_block_rsv) >
-			   btrfs_block_rsv_reserved(delayed_refs_rsv)) {
-			to_reclaim = btrfs_block_rsv_reserved(delayed_block_rsv);
+		} else if (delayed_block_rsv->reserved >
+			   delayed_refs_rsv->reserved) {
+			to_reclaim = delayed_block_rsv->reserved;
 			flush = FLUSH_DELAYED_ITEMS_NR;
 		} else {
-			to_reclaim = btrfs_block_rsv_reserved(delayed_refs_rsv);
+			to_reclaim = delayed_refs_rsv->reserved;
 			flush = FLUSH_DELAYED_REFS_NR;
 		}
 

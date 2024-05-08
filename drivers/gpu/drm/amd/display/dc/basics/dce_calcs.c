@@ -23,6 +23,8 @@
  *
  */
 
+#include <linux/slab.h>
+
 #include "resource.h"
 #include "dm_services.h"
 #include "dce_calcs.h"
@@ -92,7 +94,7 @@ static void calculate_bandwidth(
 	const uint32_t s_high = 7;
 	const uint32_t dmif_chunk_buff_margin = 1;
 
-	uint32_t max_chunks_fbc_mode = 0;
+	uint32_t max_chunks_fbc_mode;
 	int32_t num_cursor_lines;
 
 	int32_t i, j, k;

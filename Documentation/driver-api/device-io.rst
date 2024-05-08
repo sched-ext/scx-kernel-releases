@@ -517,3 +517,6 @@ Public Functions Provided
 
 .. kernel-doc:: arch/x86/include/asm/io.h
    :internal:
+
+.. kernel-doc:: lib/pci_iomap.c
+   :export:

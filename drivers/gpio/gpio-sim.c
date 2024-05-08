@@ -22,7 +22,6 @@
 #include <linux/irq_sim.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
-#include <linux/lockdep.h>
 #include <linux/minmax.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
@@ -235,10 +234,10 @@ static void gpio_sim_dbg_show(struct seq_file *seq, struct gpio_chip *gc)
 
 	guard(mutex)(&chip->lock);
 
-	for_each_hwgpio(gc, i, label)
+	for_each_requested_gpio(gc, i, label)
 		seq_printf(seq, " gpio-%-3d (%s) %s,%s\n",
 			   gc->base + i,
-			   label ?: "<unused>",
+			   label,
 			   test_bit(i, chip->direction_map) ? "input" :
 				test_bit(i, chip->value_map) ? "output-high" :
 							       "output-low",
@@ -421,7 +420,7 @@ static int gpio_sim_add_bank(struct fwnode_handle *swnode, struct device *dev)
 
 	ret = fwnode_property_read_string(swnode, "gpio-sim,label", &label);
 	if (ret) {
-		label = devm_kasprintf(dev, GFP_KERNEL, "%s:%pfwP",
+		label = devm_kasprintf(dev, GFP_KERNEL, "%s-%pfwP",
 				       dev_name(dev), swnode);
 		if (!label)
 			return -ENOMEM;
@@ -698,10 +697,8 @@ static struct gpio_sim_device *gpio_sim_hog_get_device(struct gpio_sim_hog *hog)
 	return gpio_sim_line_get_device(line);
 }
 
-static bool gpio_sim_device_is_live(struct gpio_sim_device *dev)
+static bool gpio_sim_device_is_live_unlocked(struct gpio_sim_device *dev)
 {
-	lockdep_assert_held(&dev->lock);
-
 	return !!dev->pdev;
 }
 
@@ -740,7 +737,7 @@ gpio_sim_device_config_live_show(struct config_item *item, char *page)
 	bool live;
 
 	scoped_guard(mutex, &dev->lock)
-		live = gpio_sim_device_is_live(dev);
+		live = gpio_sim_device_is_live_unlocked(dev);
 
 	return sprintf(page, "%c\n", live ? '1' : '0');
 }
@@ -836,7 +833,7 @@ static int gpio_sim_add_hogs(struct gpio_sim_device *dev)
 							  GFP_KERNEL);
 			else
 				hog->chip_label = kasprintf(GFP_KERNEL,
-							"gpio-sim.%u:%pfwP",
+							"gpio-sim.%u-%pfwP",
 							dev->id,
 							bank->swnode);
 			if (!hog->chip_label) {
@@ -929,15 +926,13 @@ static bool gpio_sim_bank_labels_non_unique(struct gpio_sim_device *dev)
 	return false;
 }
 
-static int gpio_sim_device_activate(struct gpio_sim_device *dev)
+static int gpio_sim_device_activate_unlocked(struct gpio_sim_device *dev)
 {
 	struct platform_device_info pdevinfo;
 	struct fwnode_handle *swnode;
 	struct platform_device *pdev;
 	struct gpio_sim_bank *bank;
 	int ret;
-
-	lockdep_assert_held(&dev->lock);
 
 	if (list_empty(&dev->bank_list))
 		return -ENODATA;
@@ -1003,11 +998,9 @@ static int gpio_sim_device_activate(struct gpio_sim_device *dev)
 	return 0;
 }
 
-static void gpio_sim_device_deactivate(struct gpio_sim_device *dev)
+static void gpio_sim_device_deactivate_unlocked(struct gpio_sim_device *dev)
 {
 	struct fwnode_handle *swnode;
-
-	lockdep_assert_held(&dev->lock);
 
 	swnode = dev_fwnode(&dev->pdev->dev);
 	platform_device_unregister(dev->pdev);
@@ -1030,12 +1023,12 @@ gpio_sim_device_config_live_store(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (live == gpio_sim_device_is_live(dev))
+	if (live == gpio_sim_device_is_live_unlocked(dev))
 		ret = -EPERM;
 	else if (live)
-		ret = gpio_sim_device_activate(dev);
+		ret = gpio_sim_device_activate_unlocked(dev);
 	else
-		gpio_sim_device_deactivate(dev);
+		gpio_sim_device_deactivate_unlocked(dev);
 
 	return ret ?: count;
 }
@@ -1076,7 +1069,7 @@ static ssize_t gpio_sim_bank_config_chip_name_show(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return device_for_each_child(&dev->pdev->dev, &ctx,
 					     gpio_sim_emit_chip_name);
 
@@ -1105,7 +1098,7 @@ static ssize_t gpio_sim_bank_config_label_store(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return -EBUSY;
 
 	trimmed = gpio_sim_strdup_trimmed(page, count);
@@ -1149,7 +1142,7 @@ gpio_sim_bank_config_num_lines_store(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return -EBUSY;
 
 	bank->num_lines = num_lines;
@@ -1186,7 +1179,7 @@ static ssize_t gpio_sim_line_config_name_store(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return -EBUSY;
 
 	trimmed = gpio_sim_strdup_trimmed(page, count);
@@ -1226,7 +1219,7 @@ static ssize_t gpio_sim_hog_config_name_store(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return -EBUSY;
 
 	trimmed = gpio_sim_strdup_trimmed(page, count);
@@ -1281,7 +1274,7 @@ gpio_sim_hog_config_direction_store(struct config_item *item,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return -EBUSY;
 
 	if (sysfs_streq(page, "input"))
@@ -1399,7 +1392,7 @@ gpio_sim_bank_config_make_line_group(struct config_group *group,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return ERR_PTR(-EBUSY);
 
 	line = kzalloc(sizeof(*line), GFP_KERNEL);
@@ -1452,7 +1445,7 @@ gpio_sim_device_config_make_bank_group(struct config_group *group,
 
 	guard(mutex)(&dev->lock);
 
-	if (gpio_sim_device_is_live(dev))
+	if (gpio_sim_device_is_live_unlocked(dev))
 		return ERR_PTR(-EBUSY);
 
 	bank = kzalloc(sizeof(*bank), GFP_KERNEL);
@@ -1474,8 +1467,8 @@ static void gpio_sim_device_config_group_release(struct config_item *item)
 	struct gpio_sim_device *dev = to_gpio_sim_device(item);
 
 	scoped_guard(mutex, &dev->lock) {
-		if (gpio_sim_device_is_live(dev))
-			gpio_sim_device_deactivate(dev);
+		if (gpio_sim_device_is_live_unlocked(dev))
+			gpio_sim_device_deactivate_unlocked(dev);
 	}
 
 	mutex_destroy(&dev->lock);

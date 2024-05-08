@@ -23,7 +23,7 @@ def main():
 
     err = kdamonds.start()
     if err != None:
-        print('kdamond start failed: %s' % err)
+        print('kdmaond start failed: %s' % err)
         exit(1)
 
     wss_collected = []

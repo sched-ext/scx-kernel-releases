@@ -86,25 +86,28 @@ static int ad7091r_read_raw(struct iio_dev *iio_dev,
 	unsigned int read_val;
 	int ret;
 
-	guard(mutex)(&st->lock);
+	mutex_lock(&st->lock);
 
 	switch (m) {
 	case IIO_CHAN_INFO_RAW:
-		if (st->mode != AD7091R_MODE_COMMAND)
-			return -EBUSY;
+		if (st->mode != AD7091R_MODE_COMMAND) {
+			ret = -EBUSY;
+			goto unlock;
+		}
 
 		ret = ad7091r_read_one(iio_dev, chan->channel, &read_val);
 		if (ret)
-			return ret;
+			goto unlock;
 
 		*val = read_val;
-		return IIO_VAL_INT;
+		ret = IIO_VAL_INT;
+		break;
 
 	case IIO_CHAN_INFO_SCALE:
 		if (st->vref) {
 			ret = regulator_get_voltage(st->vref);
 			if (ret < 0)
-				return ret;
+				goto unlock;
 
 			*val = ret / 1000;
 		} else {
@@ -112,11 +115,17 @@ static int ad7091r_read_raw(struct iio_dev *iio_dev,
 		}
 
 		*val2 = chan->scan_type.realbits;
-		return IIO_VAL_FRACTIONAL_LOG2;
+		ret = IIO_VAL_FRACTIONAL_LOG2;
+		break;
 
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
+
+unlock:
+	mutex_unlock(&st->lock);
+	return ret;
 }
 
 static int ad7091r_read_event_config(struct iio_dev *indio_dev,

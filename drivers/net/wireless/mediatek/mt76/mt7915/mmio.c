@@ -490,11 +490,6 @@ static u32 __mt7915_reg_addr(struct mt7915_dev *dev, u32 addr)
 		return dev->reg.map[i].maps + ofs;
 	}
 
-	return 0;
-}
-
-static u32 __mt7915_reg_remap_addr(struct mt7915_dev *dev, u32 addr)
-{
 	if ((addr >= MT_INFRA_BASE && addr < MT_WFSYS0_PHY_START) ||
 	    (addr >= MT_WFSYS0_PHY_START && addr < MT_WFSYS1_PHY_START) ||
 	    (addr >= MT_WFSYS1_PHY_START && addr <= MT_WFSYS1_PHY_END))
@@ -519,30 +514,15 @@ void mt7915_memcpy_fromio(struct mt7915_dev *dev, void *buf, u32 offset,
 {
 	u32 addr = __mt7915_reg_addr(dev, offset);
 
-	if (addr) {
-		memcpy_fromio(buf, dev->mt76.mmio.regs + addr, len);
-		return;
-	}
-
-	spin_lock_bh(&dev->reg_lock);
-	memcpy_fromio(buf, dev->mt76.mmio.regs +
-			   __mt7915_reg_remap_addr(dev, offset), len);
-	spin_unlock_bh(&dev->reg_lock);
+	memcpy_fromio(buf, dev->mt76.mmio.regs + addr, len);
 }
 
 static u32 mt7915_rr(struct mt76_dev *mdev, u32 offset)
 {
 	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
-	u32 addr = __mt7915_reg_addr(dev, offset), val;
+	u32 addr = __mt7915_reg_addr(dev, offset);
 
-	if (addr)
-		return dev->bus_ops->rr(mdev, addr);
-
-	spin_lock_bh(&dev->reg_lock);
-	val = dev->bus_ops->rr(mdev, __mt7915_reg_remap_addr(dev, offset));
-	spin_unlock_bh(&dev->reg_lock);
-
-	return val;
+	return dev->bus_ops->rr(mdev, addr);
 }
 
 static void mt7915_wr(struct mt76_dev *mdev, u32 offset, u32 val)
@@ -550,14 +530,7 @@ static void mt7915_wr(struct mt76_dev *mdev, u32 offset, u32 val)
 	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
 	u32 addr = __mt7915_reg_addr(dev, offset);
 
-	if (addr) {
-		dev->bus_ops->wr(mdev, addr, val);
-		return;
-	}
-
-	spin_lock_bh(&dev->reg_lock);
-	dev->bus_ops->wr(mdev, __mt7915_reg_remap_addr(dev, offset), val);
-	spin_unlock_bh(&dev->reg_lock);
+	dev->bus_ops->wr(mdev, addr, val);
 }
 
 static u32 mt7915_rmw(struct mt76_dev *mdev, u32 offset, u32 mask, u32 val)
@@ -565,14 +538,7 @@ static u32 mt7915_rmw(struct mt76_dev *mdev, u32 offset, u32 mask, u32 val)
 	struct mt7915_dev *dev = container_of(mdev, struct mt7915_dev, mt76);
 	u32 addr = __mt7915_reg_addr(dev, offset);
 
-	if (addr)
-		return dev->bus_ops->rmw(mdev, addr, mask, val);
-
-	spin_lock_bh(&dev->reg_lock);
-	val = dev->bus_ops->rmw(mdev, __mt7915_reg_remap_addr(dev, offset), mask, val);
-	spin_unlock_bh(&dev->reg_lock);
-
-	return val;
+	return dev->bus_ops->rmw(mdev, addr, mask, val);
 }
 
 #ifdef CONFIG_NET_MEDIATEK_SOC_WED
@@ -706,13 +672,13 @@ int mt7915_mmio_wed_init(struct mt7915_dev *dev, void *pdev_ptr,
 	}
 
 	wed->wlan.init_buf = mt7915_wed_init_buf;
-	wed->wlan.offload_enable = mt76_wed_offload_enable;
-	wed->wlan.offload_disable = mt76_wed_offload_disable;
-	wed->wlan.init_rx_buf = mt76_wed_init_rx_buf;
-	wed->wlan.release_rx_buf = mt76_wed_release_rx_buf;
+	wed->wlan.offload_enable = mt76_mmio_wed_offload_enable;
+	wed->wlan.offload_disable = mt76_mmio_wed_offload_disable;
+	wed->wlan.init_rx_buf = mt76_mmio_wed_init_rx_buf;
+	wed->wlan.release_rx_buf = mt76_mmio_wed_release_rx_buf;
 	wed->wlan.update_wo_rx_stats = mt7915_mmio_wed_update_rx_stats;
 	wed->wlan.reset = mt7915_mmio_wed_reset;
-	wed->wlan.reset_complete = mt76_wed_reset_complete;
+	wed->wlan.reset_complete = mt76_mmio_wed_reset_complete;
 
 	dev->mt76.rx_token_size = wed->wlan.rx_npkt;
 
@@ -741,7 +707,6 @@ static int mt7915_mmio_init(struct mt76_dev *mdev,
 
 	dev = container_of(mdev, struct mt7915_dev, mt76);
 	mt76_mmio_init(&dev->mt76, mem_base);
-	spin_lock_init(&dev->reg_lock);
 
 	switch (device_id) {
 	case 0x7915:
@@ -993,5 +958,4 @@ static void __exit mt7915_exit(void)
 
 module_init(mt7915_init);
 module_exit(mt7915_exit);
-MODULE_DESCRIPTION("MediaTek MT7915E MMIO helpers");
 MODULE_LICENSE("Dual BSD/GPL");

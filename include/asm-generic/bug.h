@@ -156,10 +156,7 @@ extern __printf(1, 2) void __warn_printk(const char *fmt, ...);
 
 #else /* !CONFIG_BUG */
 #ifndef HAVE_ARCH_BUG
-#define BUG() do {		\
-	do {} while (1);	\
-	unreachable();		\
-} while (0)
+#define BUG() do {} while (1)
 #endif
 
 #ifndef HAVE_ARCH_BUG_ON

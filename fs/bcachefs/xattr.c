@@ -544,11 +544,11 @@ static int bch2_xattr_bcachefs_set(const struct xattr_handler *handler,
 		kfree(buf);
 
 		if (ret < 0)
-			goto err_class_exit;
+			return ret;
 
 		ret = bch2_opt_check_may_set(c, opt_id, v);
 		if (ret < 0)
-			goto err_class_exit;
+			return ret;
 
 		s.v = v + 1;
 		s.defined = true;
@@ -595,7 +595,6 @@ err:
 	     (opt_id == Opt_compression && !inode_opt_get(c, &inode->ei_inode, background_compression))))
 		bch2_set_rebalance_needs_scan(c, inode->ei_inode.bi_inum);
 
-err_class_exit:
 	return bch2_err_class(ret);
 }
 

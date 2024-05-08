@@ -237,13 +237,12 @@ static __always_inline bool rt_mutex_cmpxchg_release(struct rt_mutex_base *lock,
  */
 static __always_inline void mark_rt_mutex_waiters(struct rt_mutex_base *lock)
 {
-	unsigned long *p = (unsigned long *) &lock->owner;
-	unsigned long owner, new;
+	unsigned long owner, *p = (unsigned long *) &lock->owner;
 
-	owner = READ_ONCE(*p);
 	do {
-		new = owner | RT_MUTEX_HAS_WAITERS;
-	} while (!try_cmpxchg_relaxed(p, &owner, new));
+		owner = *p;
+	} while (cmpxchg_relaxed(p, owner,
+				 owner | RT_MUTEX_HAS_WAITERS) != owner);
 
 	/*
 	 * The cmpxchg loop above is relaxed to avoid back-to-back ACQUIRE

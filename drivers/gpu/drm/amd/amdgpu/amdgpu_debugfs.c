@@ -1678,7 +1678,7 @@ static int amdgpu_debugfs_test_ib_show(struct seq_file *m, void *unused)
 	for (i = 0; i < AMDGPU_MAX_RINGS; i++) {
 		struct amdgpu_ring *ring = adev->rings[i];
 
-		if (!amdgpu_ring_sched_ready(ring))
+		if (!ring || !drm_sched_wqueue_ready(&ring->sched))
 			continue;
 		drm_sched_wqueue_stop(&ring->sched);
 	}
@@ -1694,7 +1694,7 @@ static int amdgpu_debugfs_test_ib_show(struct seq_file *m, void *unused)
 	for (i = 0; i < AMDGPU_MAX_RINGS; i++) {
 		struct amdgpu_ring *ring = adev->rings[i];
 
-		if (!amdgpu_ring_sched_ready(ring))
+		if (!ring || !drm_sched_wqueue_ready(&ring->sched))
 			continue;
 		drm_sched_wqueue_start(&ring->sched);
 	}
@@ -1782,14 +1782,9 @@ static int amdgpu_debugfs_vm_info_show(struct seq_file *m, void *unused)
 	list_for_each_entry(file, &dev->filelist, lhead) {
 		struct amdgpu_fpriv *fpriv = file->driver_priv;
 		struct amdgpu_vm *vm = &fpriv->vm;
-		struct amdgpu_task_info *ti;
 
-		ti = amdgpu_vm_get_task_info_vm(vm);
-		if (ti) {
-			seq_printf(m, "pid:%d\tProcess:%s ----------\n", ti->pid, ti->process_name);
-			amdgpu_vm_put_task_info(ti);
-		}
-
+		seq_printf(m, "pid:%d\tProcess:%s ----------\n",
+				vm->task_info.pid, vm->task_info.process_name);
 		r = amdgpu_bo_reserve(vm->root.bo, true);
 		if (r)
 			break;
@@ -1921,8 +1916,8 @@ static int amdgpu_debugfs_ib_preempt(void *data, u64 val)
 
 	ring = adev->rings[val];
 
-	if (!amdgpu_ring_sched_ready(ring) ||
-	    !ring->funcs->preempt_ib)
+	if (!ring || !ring->funcs->preempt_ib ||
+	    !drm_sched_wqueue_ready(&ring->sched))
 		return -EINVAL;
 
 	/* the last preemption failed */

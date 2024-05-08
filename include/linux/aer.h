@@ -18,8 +18,11 @@
 
 struct pci_dev;
 
-struct pcie_tlp_log {
-	u32 dw[4];
+struct aer_header_log_regs {
+	u32 dw0;
+	u32 dw1;
+	u32 dw2;
+	u32 dw3;
 };
 
 struct aer_capability_regs {
@@ -30,14 +33,12 @@ struct aer_capability_regs {
 	u32 cor_status;
 	u32 cor_mask;
 	u32 cap_control;
-	struct pcie_tlp_log header_log;
+	struct aer_header_log_regs header_log;
 	u32 root_command;
 	u32 root_status;
 	u16 cor_err_source;
 	u16 uncor_err_source;
 };
-
-int pcie_read_tlp_log(struct pci_dev *dev, int where, struct pcie_tlp_log *log);
 
 #if defined(CONFIG_PCIEAER)
 int pci_aer_clear_nonfatal_status(struct pci_dev *dev);

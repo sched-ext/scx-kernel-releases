@@ -614,10 +614,7 @@ enum devlink_attr {
 
 	DEVLINK_ATTR_REGION_DIRECT,		/* flag */
 
-	/* Add new attributes above here, update the spec in
-	 * Documentation/netlink/specs/devlink.yaml and re-generate
-	 * net/devlink/netlink_gen.c.
-	 */
+	/* add new attributes above here, update the policy in devlink.c */
 
 	__DEVLINK_ATTR_MAX,
 	DEVLINK_ATTR_MAX = __DEVLINK_ATTR_MAX - 1

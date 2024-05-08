@@ -34,8 +34,6 @@ properties:
 
   interrupt-controller: true
 
-  system-power-controller: true
-
   "#interrupt-cells":
     const: 1
 

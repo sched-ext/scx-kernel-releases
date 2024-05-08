@@ -17,6 +17,7 @@
 #include <linux/of_platform.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
+#include <linux/pm_qos.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/soc/mediatek/mtk_sip_svc.h>
@@ -625,9 +626,21 @@ static void ufs_mtk_init_host_caps(struct ufs_hba *hba)
 	dev_info(hba->dev, "caps: 0x%x", host->caps);
 }
 
+static void ufs_mtk_boost_pm_qos(struct ufs_hba *hba, bool boost)
+{
+	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
+
+	if (!host || !host->pm_qos_init)
+		return;
+
+	cpu_latency_qos_update_request(&host->pm_qos_req,
+				       boost ? 0 : PM_QOS_DEFAULT_VALUE);
+}
+
 static void ufs_mtk_scale_perf(struct ufs_hba *hba, bool scale_up)
 {
 	ufs_mtk_boost_crypt(hba, scale_up);
+	ufs_mtk_boost_pm_qos(hba, scale_up);
 }
 
 static void ufs_mtk_pwr_ctrl(struct ufs_hba *hba, bool on)
@@ -645,45 +658,6 @@ static void ufs_mtk_pwr_ctrl(struct ufs_hba *hba, bool on)
 		ufs_mtk_setup_ref_clk(hba, on);
 		phy_power_off(host->mphy);
 	}
-}
-
-static void ufs_mtk_mcq_disable_irq(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	u32 irq, i;
-
-	if (!is_mcq_enabled(hba))
-		return;
-
-	if (host->mcq_nr_intr == 0)
-		return;
-
-	for (i = 0; i < host->mcq_nr_intr; i++) {
-		irq = host->mcq_intr_info[i].irq;
-		disable_irq(irq);
-	}
-	host->is_mcq_intr_enabled = false;
-}
-
-static void ufs_mtk_mcq_enable_irq(struct ufs_hba *hba)
-{
-	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
-	u32 irq, i;
-
-	if (!is_mcq_enabled(hba))
-		return;
-
-	if (host->mcq_nr_intr == 0)
-		return;
-
-	if (host->is_mcq_intr_enabled == true)
-		return;
-
-	for (i = 0; i < host->mcq_nr_intr; i++) {
-		irq = host->mcq_intr_info[i].irq;
-		enable_irq(irq);
-	}
-	host->is_mcq_intr_enabled = true;
 }
 
 /**
@@ -729,10 +703,8 @@ static int ufs_mtk_setup_clocks(struct ufs_hba *hba, bool on,
 
 		if (clk_pwr_off)
 			ufs_mtk_pwr_ctrl(hba, false);
-		ufs_mtk_mcq_disable_irq(hba);
 	} else if (on && status == POST_CHANGE) {
 		ufs_mtk_pwr_ctrl(hba, true);
-		ufs_mtk_mcq_enable_irq(hba);
 	}
 
 	return ret;
@@ -921,7 +893,6 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 	const struct of_device_id *id;
 	struct device *dev = hba->dev;
 	struct ufs_mtk_host *host;
-	struct Scsi_Host *shost = hba->host;
 	int err = 0;
 
 	host = devm_kzalloc(dev, sizeof(*host), GFP_KERNEL);
@@ -966,9 +937,6 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 	/* Enable clk scaling*/
 	hba->caps |= UFSHCD_CAP_CLK_SCALING;
 
-	/* Set runtime pm delay to replace default */
-	shost->rpm_autosuspend_delay = MTK_RPM_AUTOSUSPEND_DELAY_MS;
-
 	hba->quirks |= UFSHCI_QUIRK_SKIP_MANUAL_WB_FLUSH_CTRL;
 	hba->quirks |= UFSHCD_QUIRK_MCQ_BROKEN_INTR;
 	hba->quirks |= UFSHCD_QUIRK_MCQ_BROKEN_RTC;
@@ -990,6 +958,10 @@ static int ufs_mtk_init(struct ufs_hba *hba)
 	ufs_mtk_setup_clocks(hba, true, POST_CHANGE);
 
 	host->ip_ver = ufshcd_readl(hba, REG_UFS_MTK_IP_VER);
+
+	/* Initialize pm-qos request */
+	cpu_latency_qos_add_request(&host->pm_qos_req, PM_QOS_DEFAULT_VALUE);
+	host->pm_qos_init = true;
 
 	goto out;
 
@@ -1234,28 +1206,24 @@ static int ufs_mtk_link_set_hpm(struct ufs_hba *hba)
 		return err;
 
 	err = ufshcd_uic_hibern8_exit(hba);
-	if (err)
+	if (!err)
+		ufshcd_set_link_active(hba);
+	else
 		return err;
 
-	/* Check link state to make sure exit h8 success */
-	ufs_mtk_wait_idle_state(hba, 5);
-	err = ufs_mtk_wait_link_state(hba, VS_LINK_UP, 100);
-	if (err) {
-		dev_warn(hba->dev, "exit h8 state fail, err=%d\n", err);
-		return err;
-	}
-	ufshcd_set_link_active(hba);
-
-	err = ufshcd_make_hba_operational(hba);
-	if (err)
-		return err;
-
-	if (is_mcq_enabled(hba)) {
+	if (!hba->mcq_enabled) {
+		err = ufshcd_make_hba_operational(hba);
+	} else {
 		ufs_mtk_config_mcq(hba, false);
 		ufshcd_mcq_make_queues_operational(hba);
 		ufshcd_mcq_config_mac(hba, hba->nutrs);
-		ufshcd_mcq_enable(hba);
+		/* Enable MCQ mode */
+		ufshcd_writel(hba, ufshcd_readl(hba, REG_UFS_MEM_CFG) | 0x1,
+			      REG_UFS_MEM_CFG);
 	}
+
+	if (err)
+		return err;
 
 	return 0;
 }

@@ -120,7 +120,6 @@
 				interrupts = <2 IRQ_TYPE_LEVEL_HIGH>,
 					     <3 IRQ_TYPE_LEVEL_HIGH>,
 					     <4 IRQ_TYPE_LEVEL_HIGH>;
-				#interrupt-cells = <2>;
 				interrupt-controller;
 			};
 
@@ -129,7 +128,6 @@
 				gpio-controller;
 				#gpio-cells = <2>;
 				interrupts = <5 IRQ_TYPE_LEVEL_HIGH>;
-				#interrupt-cells = <2>;
 				interrupt-controller;
 			};
 

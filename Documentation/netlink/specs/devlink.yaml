@@ -290,7 +290,7 @@ attribute-sets:
         enum: eswitch-mode
       -
         name: eswitch-inline-mode
-        type: u8
+        type: u16
         enum: eswitch-inline-mode
       -
         name: dpipe-tables

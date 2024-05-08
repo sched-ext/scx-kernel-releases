@@ -894,7 +894,7 @@ int do_ip_setsockopt(struct sock *sk, int level, int optname,
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct net *net = sock_net(sk);
-	int val = 0, err, retv;
+	int val = 0, err;
 	bool needs_rtnl = setsockopt_needs_rtnl(optname);
 
 	switch (optname) {
@@ -938,12 +938,8 @@ int do_ip_setsockopt(struct sock *sk, int level, int optname,
 
 	/* If optlen==0, it is equivalent to val == 0 */
 
-	if (optname == IP_ROUTER_ALERT) {
-		retv = ip_ra_control(sk, val ? 1 : 0, NULL);
-		if (retv == 0)
-			inet_assign_bit(RTALERT, sk, val);
-		return retv;
-	}
+	if (optname == IP_ROUTER_ALERT)
+		return ip_ra_control(sk, val ? 1 : 0, NULL);
 	if (ip_mroute_opt(optname))
 		return ip_mroute_setsockopt(sk, optname, optval, optlen);
 
@@ -1367,13 +1363,12 @@ e_inval:
  * ipv4_pktinfo_prepare - transfer some info from rtable to skb
  * @sk: socket
  * @skb: buffer
- * @drop_dst: if true, drops skb dst
  *
  * To support IP_CMSG_PKTINFO option, we store rt_iif and specific
  * destination in skb->cb[] before dst drop.
  * This way, receiver doesn't make cache line misses to read rtable.
  */
-void ipv4_pktinfo_prepare(const struct sock *sk, struct sk_buff *skb, bool drop_dst)
+void ipv4_pktinfo_prepare(const struct sock *sk, struct sk_buff *skb)
 {
 	struct in_pktinfo *pktinfo = PKTINFO_SKB_CB(skb);
 	bool prepare = inet_test_bit(PKTINFO, sk) ||
@@ -1402,8 +1397,7 @@ void ipv4_pktinfo_prepare(const struct sock *sk, struct sk_buff *skb, bool drop_
 		pktinfo->ipi_ifindex = 0;
 		pktinfo->ipi_spec_dst.s_addr = 0;
 	}
-	if (drop_dst)
-		skb_dst_drop(skb);
+	skb_dst_drop(skb);
 }
 
 int ip_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
@@ -1578,9 +1572,6 @@ int do_ip_getsockopt(struct sock *sk, int level, int optname,
 		goto copyval;
 	case IP_BIND_ADDRESS_NO_PORT:
 		val = inet_test_bit(BIND_ADDRESS_NO_PORT, sk);
-		goto copyval;
-	case IP_ROUTER_ALERT:
-		val = inet_test_bit(RTALERT, sk);
 		goto copyval;
 	case IP_TTL:
 		val = READ_ONCE(inet->uc_ttl);

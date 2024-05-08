@@ -89,8 +89,10 @@ static int hisi_rng_probe(struct platform_device *pdev)
 	rng->rng.read = hisi_rng_read;
 
 	ret = devm_hwrng_register(&pdev->dev, &rng->rng);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "failed to register hwrng\n");
+	if (ret) {
+		dev_err(&pdev->dev, "failed to register hwrng\n");
+		return ret;
+	}
 
 	return 0;
 }

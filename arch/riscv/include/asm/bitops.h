@@ -22,16 +22,6 @@
 #include <asm-generic/bitops/fls.h>
 
 #else
-#define __HAVE_ARCH___FFS
-#define __HAVE_ARCH___FLS
-#define __HAVE_ARCH_FFS
-#define __HAVE_ARCH_FLS
-
-#include <asm-generic/bitops/__ffs.h>
-#include <asm-generic/bitops/__fls.h>
-#include <asm-generic/bitops/ffs.h>
-#include <asm-generic/bitops/fls.h>
-
 #include <asm/alternative-macros.h>
 #include <asm/hwcap.h>
 
@@ -47,7 +37,9 @@
 
 static __always_inline unsigned long variable__ffs(unsigned long word)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
+	int num;
+
+	asm_volatile_goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
 				      RISCV_ISA_EXT_ZBB, 1)
 			  : : : : legacy);
 
@@ -60,7 +52,32 @@ static __always_inline unsigned long variable__ffs(unsigned long word)
 	return word;
 
 legacy:
-	return generic___ffs(word);
+	num = 0;
+#if BITS_PER_LONG == 64
+	if ((word & 0xffffffff) == 0) {
+		num += 32;
+		word >>= 32;
+	}
+#endif
+	if ((word & 0xffff) == 0) {
+		num += 16;
+		word >>= 16;
+	}
+	if ((word & 0xff) == 0) {
+		num += 8;
+		word >>= 8;
+	}
+	if ((word & 0xf) == 0) {
+		num += 4;
+		word >>= 4;
+	}
+	if ((word & 0x3) == 0) {
+		num += 2;
+		word >>= 2;
+	}
+	if ((word & 0x1) == 0)
+		num += 1;
+	return num;
 }
 
 /**
@@ -76,7 +93,9 @@ legacy:
 
 static __always_inline unsigned long variable__fls(unsigned long word)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
+	int num;
+
+	asm_volatile_goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
 				      RISCV_ISA_EXT_ZBB, 1)
 			  : : : : legacy);
 
@@ -89,7 +108,32 @@ static __always_inline unsigned long variable__fls(unsigned long word)
 	return BITS_PER_LONG - 1 - word;
 
 legacy:
-	return generic___fls(word);
+	num = BITS_PER_LONG - 1;
+#if BITS_PER_LONG == 64
+	if (!(word & (~0ul << 32))) {
+		num -= 32;
+		word <<= 32;
+	}
+#endif
+	if (!(word & (~0ul << (BITS_PER_LONG - 16)))) {
+		num -= 16;
+		word <<= 16;
+	}
+	if (!(word & (~0ul << (BITS_PER_LONG - 8)))) {
+		num -= 8;
+		word <<= 8;
+	}
+	if (!(word & (~0ul << (BITS_PER_LONG - 4)))) {
+		num -= 4;
+		word <<= 4;
+	}
+	if (!(word & (~0ul << (BITS_PER_LONG - 2)))) {
+		num -= 2;
+		word <<= 2;
+	}
+	if (!(word & (~0ul << (BITS_PER_LONG - 1))))
+		num -= 1;
+	return num;
 }
 
 /**
@@ -105,23 +149,46 @@ legacy:
 
 static __always_inline int variable_ffs(int x)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
-				      RISCV_ISA_EXT_ZBB, 1)
-			  : : : : legacy);
+	int r;
 
 	if (!x)
 		return 0;
+
+	asm_volatile_goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
+				      RISCV_ISA_EXT_ZBB, 1)
+			  : : : : legacy);
 
 	asm volatile (".option push\n"
 		      ".option arch,+zbb\n"
 		      CTZW "%0, %1\n"
 		      ".option pop\n"
-		      : "=r" (x) : "r" (x) :);
+		      : "=r" (r) : "r" (x) :);
 
-	return x + 1;
+	return r + 1;
 
 legacy:
-	return generic_ffs(x);
+	r = 1;
+	if (!(x & 0xffff)) {
+		x >>= 16;
+		r += 16;
+	}
+	if (!(x & 0xff)) {
+		x >>= 8;
+		r += 8;
+	}
+	if (!(x & 0xf)) {
+		x >>= 4;
+		r += 4;
+	}
+	if (!(x & 3)) {
+		x >>= 2;
+		r += 2;
+	}
+	if (!(x & 1)) {
+		x >>= 1;
+		r += 1;
+	}
+	return r;
 }
 
 /**
@@ -137,23 +204,46 @@ legacy:
 
 static __always_inline int variable_fls(unsigned int x)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
-				      RISCV_ISA_EXT_ZBB, 1)
-			  : : : : legacy);
+	int r;
 
 	if (!x)
 		return 0;
+
+	asm_volatile_goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
+				      RISCV_ISA_EXT_ZBB, 1)
+			  : : : : legacy);
 
 	asm volatile (".option push\n"
 		      ".option arch,+zbb\n"
 		      CLZW "%0, %1\n"
 		      ".option pop\n"
-		      : "=r" (x) : "r" (x) :);
+		      : "=r" (r) : "r" (x) :);
 
-	return 32 - x;
+	return 32 - r;
 
 legacy:
-	return generic_fls(x);
+	r = 32;
+	if (!(x & 0xffff0000u)) {
+		x <<= 16;
+		r -= 16;
+	}
+	if (!(x & 0xff000000u)) {
+		x <<= 8;
+		r -= 8;
+	}
+	if (!(x & 0xf0000000u)) {
+		x <<= 4;
+		r -= 4;
+	}
+	if (!(x & 0xc0000000u)) {
+		x <<= 2;
+		r -= 2;
+	}
+	if (!(x & 0x80000000u)) {
+		x <<= 1;
+		r -= 1;
+	}
+	return r;
 }
 
 /**

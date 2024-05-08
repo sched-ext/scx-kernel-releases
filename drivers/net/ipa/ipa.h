@@ -21,6 +21,7 @@
 struct clk;
 struct icc_path;
 struct net_device;
+struct platform_device;
 
 struct ipa_power;
 struct ipa_smp2p;
@@ -30,7 +31,7 @@ struct ipa_interrupt;
  * struct ipa - IPA information
  * @gsi:		Embedded GSI structure
  * @version:		IPA hardware version
- * @dev:		IPA device pointer
+ * @pdev:		Platform device
  * @completion:		Used to signal pipeline clear transfer complete
  * @nb:			Notifier block used for remoteproc SSR
  * @notifier:		Remoteproc SSR notifier
@@ -78,7 +79,7 @@ struct ipa_interrupt;
 struct ipa {
 	struct gsi gsi;
 	enum ipa_version version;
-	struct device *dev;
+	struct platform_device *pdev;
 	struct completion completion;
 	struct notifier_block nb;
 	void *notifier;

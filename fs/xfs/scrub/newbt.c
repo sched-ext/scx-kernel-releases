@@ -239,11 +239,7 @@ xrep_newbt_alloc_ag_blocks(
 
 		xrep_newbt_validate_ag_alloc_hint(xnr);
 
-		if (xnr->alloc_vextent)
-			error = xnr->alloc_vextent(sc, &args, xnr->alloc_hint);
-		else
-			error = xfs_alloc_vextent_near_bno(&args,
-					xnr->alloc_hint);
+		error = xfs_alloc_vextent_near_bno(&args, xnr->alloc_hint);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -313,11 +309,7 @@ xrep_newbt_alloc_file_blocks(
 
 		xrep_newbt_validate_file_alloc_hint(xnr);
 
-		if (xnr->alloc_vextent)
-			error = xnr->alloc_vextent(sc, &args, xnr->alloc_hint);
-		else
-			error = xfs_alloc_vextent_start_ag(&args,
-					xnr->alloc_hint);
+		error = xfs_alloc_vextent_start_ag(&args, xnr->alloc_hint);
 		if (error)
 			return error;
 		if (args.fsbno == NULLFSBLOCK)
@@ -543,7 +535,7 @@ xrep_newbt_claim_block(
 	trace_xrep_newbt_claim_block(mp, resv->pag->pag_agno, agbno, 1,
 			xnr->oinfo.oi_owner);
 
-	if (cur->bc_ops->ptr_len == XFS_BTREE_LONG_PTR_LEN)
+	if (cur->bc_flags & XFS_BTREE_LONG_PTRS)
 		ptr->l = cpu_to_be64(XFS_AGB_TO_FSB(mp, resv->pag->pag_agno,
 								agbno));
 	else

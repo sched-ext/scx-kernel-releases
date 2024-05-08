@@ -636,7 +636,7 @@ int rtllib_wx_set_mlme(struct rtllib_device *ieee,
 
 		ieee->cannot_notify = true;
 
-		send_disassociation(ieee, deauth, mlme->reason_code);
+		SendDisassociation(ieee, deauth, mlme->reason_code);
 		rtllib_disassociate(ieee);
 
 		ieee->wap_set = 0;

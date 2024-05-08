@@ -9,13 +9,12 @@
 #include <kunit/test.h>
 #include <linux/errname.h>
 #include <linux/ethtool.h>
-#include <linux/jiffies.h>
 #include <linux/mdio.h>
 #include <linux/phy.h>
-#include <linux/refcount.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/refcount.h>
 #include <linux/wait.h>
+#include <linux/sched.h>
 #include <linux/workqueue.h>
 
 /* `bindgen` gets confused at certain things. */

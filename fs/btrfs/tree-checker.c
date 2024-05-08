@@ -21,6 +21,7 @@
 #include "messages.h"
 #include "ctree.h"
 #include "tree-checker.h"
+#include "disk-io.h"
 #include "compression.h"
 #include "volumes.h"
 #include "misc.h"
@@ -29,6 +30,7 @@
 #include "file-item.h"
 #include "inode-item.h"
 #include "dir-item.h"
+#include "raid-stripe-tree.h"
 #include "extent-tree.h"
 
 /*
@@ -65,7 +67,6 @@ static void generic_err(const struct extent_buffer *eb, int slot,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	dump_page(folio_page(eb->folios[0], 0), "eb page dump");
 	btrfs_crit(fs_info,
 		"corrupt %s: root=%llu block=%llu slot=%d, %pV",
 		btrfs_header_level(eb) == 0 ? "leaf" : "node",
@@ -93,7 +94,6 @@ static void file_extent_err(const struct extent_buffer *eb, int slot,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	dump_page(folio_page(eb->folios[0], 0), "eb page dump");
 	btrfs_crit(fs_info,
 	"corrupt %s: root=%llu block=%llu slot=%d ino=%llu file_offset=%llu, %pV",
 		btrfs_header_level(eb) == 0 ? "leaf" : "node",
@@ -154,7 +154,6 @@ static void dir_item_err(const struct extent_buffer *eb, int slot,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	dump_page(folio_page(eb->folios[0], 0), "eb page dump");
 	btrfs_crit(fs_info,
 		"corrupt %s: root=%llu block=%llu slot=%d ino=%llu, %pV",
 		btrfs_header_level(eb) == 0 ? "leaf" : "node",
@@ -650,7 +649,6 @@ static void block_group_err(const struct extent_buffer *eb, int slot,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	dump_page(folio_page(eb->folios[0], 0), "eb page dump");
 	btrfs_crit(fs_info,
 	"corrupt %s: root=%llu block=%llu slot=%d bg_start=%llu bg_len=%llu, %pV",
 		btrfs_header_level(eb) == 0 ? "leaf" : "node",
@@ -1007,7 +1005,6 @@ static void dev_item_err(const struct extent_buffer *eb, int slot,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	dump_page(folio_page(eb->folios[0], 0), "eb page dump");
 	btrfs_crit(eb->fs_info,
 	"corrupt %s: root=%llu block=%llu slot=%d devid=%llu %pV",
 		btrfs_header_level(eb) == 0 ? "leaf" : "node",
@@ -1263,7 +1260,6 @@ static void extent_err(const struct extent_buffer *eb, int slot,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	dump_page(folio_page(eb->folios[0], 0), "eb page dump");
 	btrfs_crit(eb->fs_info,
 	"corrupt %s: block=%llu slot=%d extent bytenr=%llu len=%llu %pV",
 		btrfs_header_level(eb) == 0 ? "leaf" : "node",

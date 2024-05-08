@@ -951,11 +951,8 @@ int otx2_sq_init(struct otx2_nic *pfvf, u16 qidx, u16 sqb_aura)
 	if (pfvf->ptp && qidx < pfvf->hw.tx_queues) {
 		err = qmem_alloc(pfvf->dev, &sq->timestamps, qset->sqe_cnt,
 				 sizeof(*sq->timestamps));
-		if (err) {
-			kfree(sq->sg);
-			sq->sg = NULL;
+		if (err)
 			return err;
-		}
 	}
 
 	sq->head = 0;
@@ -971,14 +968,7 @@ int otx2_sq_init(struct otx2_nic *pfvf, u16 qidx, u16 sqb_aura)
 	sq->stats.bytes = 0;
 	sq->stats.pkts = 0;
 
-	err = pfvf->hw_ops->sq_aq_init(pfvf, qidx, sqb_aura);
-	if (err) {
-		kfree(sq->sg);
-		sq->sg = NULL;
-		return err;
-	}
-
-	return 0;
+	return pfvf->hw_ops->sq_aq_init(pfvf, qidx, sqb_aura);
 
 }
 
@@ -1592,7 +1582,7 @@ int otx2_detach_resources(struct mbox *mbox)
 	detach->partial = false;
 
 	/* Send detach request to AF */
-	otx2_sync_mbox_msg(mbox);
+	otx2_mbox_msg_send(&mbox->mbox, 0);
 	mutex_unlock(&mbox->lock);
 	return 0;
 }

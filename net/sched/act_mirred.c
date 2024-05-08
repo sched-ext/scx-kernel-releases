@@ -232,14 +232,18 @@ release_idr:
 	return err;
 }
 
-static int
-tcf_mirred_forward(bool at_ingress, bool want_ingress, struct sk_buff *skb)
+static bool is_mirred_nested(void)
+{
+	return unlikely(__this_cpu_read(mirred_nest_level) > 1);
+}
+
+static int tcf_mirred_forward(bool want_ingress, struct sk_buff *skb)
 {
 	int err;
 
 	if (!want_ingress)
 		err = tcf_dev_queue_xmit(skb, dev_queue_xmit);
-	else if (!at_ingress)
+	else if (is_mirred_nested())
 		err = netif_rx(skb);
 	else
 		err = netif_receive_skb(skb);
@@ -266,7 +270,8 @@ static int tcf_mirred_to_dev(struct sk_buff *skb, struct tcf_mirred *m,
 	if (unlikely(!(dev->flags & IFF_UP)) || !netif_carrier_ok(dev)) {
 		net_notice_ratelimited("tc mirred to Houston: device %s is down\n",
 				       dev->name);
-		goto err_cant_do;
+		err = -ENODEV;
+		goto out;
 	}
 
 	/* we could easily avoid the clone only if called by ingress and clsact;
@@ -278,8 +283,10 @@ static int tcf_mirred_to_dev(struct sk_buff *skb, struct tcf_mirred *m,
 		tcf_mirred_can_reinsert(retval);
 	if (!dont_clone) {
 		skb_to_send = skb_clone(skb, GFP_ATOMIC);
-		if (!skb_to_send)
-			goto err_cant_do;
+		if (!skb_to_send) {
+			err =  -ENOMEM;
+			goto out;
+		}
 	}
 
 	want_ingress = tcf_mirred_act_wants_ingress(m_eaction);
@@ -312,19 +319,18 @@ static int tcf_mirred_to_dev(struct sk_buff *skb, struct tcf_mirred *m,
 
 		skb_set_redirected(skb_to_send, skb_to_send->tc_at_ingress);
 
-		err = tcf_mirred_forward(at_ingress, want_ingress, skb_to_send);
+		err = tcf_mirred_forward(want_ingress, skb_to_send);
 	} else {
-		err = tcf_mirred_forward(at_ingress, want_ingress, skb_to_send);
+		err = tcf_mirred_forward(want_ingress, skb_to_send);
 	}
-	if (err)
+
+	if (err) {
+out:
 		tcf_action_inc_overlimit_qstats(&m->common);
+		if (is_redirect)
+			retval = TC_ACT_SHOT;
+	}
 
-	return retval;
-
-err_cant_do:
-	if (is_redirect)
-		retval = TC_ACT_SHOT;
-	tcf_action_inc_overlimit_qstats(&m->common);
 	return retval;
 }
 
@@ -527,6 +533,8 @@ static int mirred_device_event(struct notifier_block *unused,
 				 * net_device are already rcu protected.
 				 */
 				RCU_INIT_POINTER(m->tcfm_dev, NULL);
+			} else if (m->tcfm_blockid) {
+				m->tcfm_blockid = 0;
 			}
 			spin_unlock_bh(&m->tcf_lock);
 		}
@@ -635,7 +643,6 @@ static struct tc_action_ops act_mirred_ops = {
 	.size		=	sizeof(struct tcf_mirred),
 	.get_dev	=	tcf_mirred_get_dev,
 };
-MODULE_ALIAS_NET_ACT("mirred");
 
 static __net_init int mirred_init_net(struct net *net)
 {

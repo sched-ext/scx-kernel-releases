@@ -36,7 +36,6 @@
 #include <net/compat.h>
 #include <net/scm.h>
 #include <net/cls_cgroup.h>
-#include <net/af_unix.h>
 
 
 /*
@@ -86,7 +85,6 @@ static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 			return -ENOMEM;
 		*fplp = fpl;
 		fpl->count = 0;
-		fpl->count_unix = 0;
 		fpl->max = SCM_MAX_FD;
 		fpl->user = NULL;
 	}
@@ -111,9 +109,6 @@ static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 			fput(file);
 			return -EINVAL;
 		}
-		if (unix_get_socket(file))
-			fpl->count_unix++;
-
 		*fpp++ = file;
 		fpl->count++;
 	}

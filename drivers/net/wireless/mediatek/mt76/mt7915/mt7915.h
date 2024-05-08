@@ -287,7 +287,6 @@ struct mt7915_dev {
 
 	struct list_head sta_rc_list;
 	struct list_head twt_list;
-	spinlock_t reg_lock;
 
 	u32 hw_pattern;
 

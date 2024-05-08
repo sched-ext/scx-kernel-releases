@@ -12,8 +12,6 @@
 #include "ipa_version.h"
 #include "reg.h"
 
-struct platform_device;
-
 struct ipa;
 
 /**
@@ -645,7 +643,7 @@ extern const struct regs ipa_regs_v5_5;
 
 const struct reg *ipa_reg(struct ipa *ipa, enum ipa_reg_id reg_id);
 
-int ipa_reg_init(struct ipa *ipa, struct platform_device *pdev);
+int ipa_reg_init(struct ipa *ipa);
 void ipa_reg_exit(struct ipa *ipa);
 
 #endif /* _IPA_REG_H_ */

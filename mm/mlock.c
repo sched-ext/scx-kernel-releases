@@ -206,7 +206,8 @@ static void mlock_folio_batch(struct folio_batch *fbatch)
 
 	if (lruvec)
 		unlock_page_lruvec_irq(lruvec);
-	folios_put(fbatch);
+	folios_put(fbatch->folios, folio_batch_count(fbatch));
+	folio_batch_reinit(fbatch);
 }
 
 void mlock_drain_local(void)

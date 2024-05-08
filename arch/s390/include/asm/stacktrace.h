@@ -4,6 +4,7 @@
 
 #include <linux/uaccess.h>
 #include <linux/ptrace.h>
+#include <asm/switch_to.h>
 
 struct stack_frame_user {
 	unsigned long back_chain;

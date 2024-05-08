@@ -645,7 +645,6 @@ static struct tc_action_ops act_gate_ops = {
 	.offload_act_setup =	tcf_gate_offload_act_setup,
 	.size		=	sizeof(struct tcf_gate),
 };
-MODULE_ALIAS_NET_ACT("gate");
 
 static __net_init int gate_init_net(struct net *net)
 {

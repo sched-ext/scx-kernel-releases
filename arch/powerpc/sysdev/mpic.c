@@ -49,7 +49,7 @@
 #define DBG(fmt...)
 #endif
 
-const struct bus_type mpic_subsys = {
+struct bus_type mpic_subsys = {
 	.name = "mpic",
 	.dev_name = "mpic",
 };

@@ -64,11 +64,12 @@ static const struct landlock_ruleset *get_current_net_domain(void)
 static int current_check_access_socket(struct socket *const sock,
 				       struct sockaddr *const address,
 				       const int addrlen,
-				       access_mask_t access_request)
+				       const access_mask_t access_request)
 {
 	__be16 port;
 	layer_mask_t layer_masks[LANDLOCK_NUM_ACCESS_NET] = {};
 	const struct landlock_rule *rule;
+	access_mask_t handled_access;
 	struct landlock_id id = {
 		.type = LANDLOCK_KEY_NET_PORT,
 	};
@@ -163,9 +164,9 @@ static int current_check_access_socket(struct socket *const sock,
 	BUILD_BUG_ON(sizeof(port) > sizeof(id.key.data));
 
 	rule = landlock_find_rule(dom, id);
-	access_request = landlock_init_layer_masks(
+	handled_access = landlock_init_layer_masks(
 		dom, access_request, &layer_masks, LANDLOCK_KEY_NET_PORT);
-	if (landlock_unmask_layers(rule, access_request, &layer_masks,
+	if (landlock_unmask_layers(rule, handled_access, &layer_masks,
 				   ARRAY_SIZE(layer_masks)))
 		return 0;
 

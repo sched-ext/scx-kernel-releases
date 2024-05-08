@@ -135,7 +135,7 @@ err_p4d:
 
 #ifdef CONFIG_PGSTE
 
-struct ptdesc *page_table_alloc_pgste(struct mm_struct *mm)
+struct page *page_table_alloc_pgste(struct mm_struct *mm)
 {
 	struct ptdesc *ptdesc;
 	u64 *table;
@@ -147,12 +147,12 @@ struct ptdesc *page_table_alloc_pgste(struct mm_struct *mm)
 		memset64(table, _PAGE_INVALID, PTRS_PER_PTE);
 		memset64(table + PTRS_PER_PTE, 0, PTRS_PER_PTE);
 	}
-	return ptdesc;
+	return ptdesc_page(ptdesc);
 }
 
-void page_table_free_pgste(struct ptdesc *ptdesc)
+void page_table_free_pgste(struct page *page)
 {
-	pagetable_free(ptdesc);
+	pagetable_free(page_ptdesc(page));
 }
 
 #endif /* CONFIG_PGSTE */

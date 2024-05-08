@@ -136,7 +136,7 @@ static void __init dtb_cpu_setup(void)
 			pr_warn("%pOF: missing local APIC ID\n", dn);
 			continue;
 		}
-		topology_register_apic(apic_id, CPU_ACPIID_INVALID, true);
+		generic_processor_info(apic_id);
 	}
 }
 
@@ -283,28 +283,26 @@ void __init x86_flattree_get_config(void)
 	u32 size, map_len;
 	void *dt;
 
-	if (initial_dtb) {
-		map_len = max(PAGE_SIZE - (initial_dtb & ~PAGE_MASK), (u64)128);
+	if (!initial_dtb)
+		return;
 
-		dt = early_memremap(initial_dtb, map_len);
-		size = fdt_totalsize(dt);
-		if (map_len < size) {
-			early_memunmap(dt, map_len);
-			dt = early_memremap(initial_dtb, size);
-			map_len = size;
-		}
+	map_len = max(PAGE_SIZE - (initial_dtb & ~PAGE_MASK), (u64)128);
 
-		early_init_dt_verify(dt);
+	dt = early_memremap(initial_dtb, map_len);
+	size = fdt_totalsize(dt);
+	if (map_len < size) {
+		early_memunmap(dt, map_len);
+		dt = early_memremap(initial_dtb, size);
+		map_len = size;
 	}
 
+	early_init_dt_verify(dt);
 	unflatten_and_copy_device_tree();
-
-	if (initial_dtb)
-		early_memunmap(dt, map_len);
+	early_memunmap(dt, map_len);
 }
 #endif
 
-void __init x86_dtb_parse_smp_config(void)
+void __init x86_dtb_init(void)
 {
 	if (!of_have_populated_dt())
 		return;

@@ -280,17 +280,8 @@ void e1000e_ptp_init(struct e1000_adapter *adapter)
 
 	switch (hw->mac.type) {
 	case e1000_pch2lan:
-		adapter->ptp_clock_info.max_adj = MAX_PPB_96MHZ;
-		break;
 	case e1000_pch_lpt:
-		if (er32(TSYNCRXCTL) & E1000_TSYNCRXCTL_SYSCFI)
-			adapter->ptp_clock_info.max_adj = MAX_PPB_96MHZ;
-		else
-			adapter->ptp_clock_info.max_adj = MAX_PPB_25MHZ;
-		break;
 	case e1000_pch_spt:
-		adapter->ptp_clock_info.max_adj = MAX_PPB_24MHZ;
-		break;
 	case e1000_pch_cnp:
 	case e1000_pch_tgp:
 	case e1000_pch_adp:
@@ -298,14 +289,15 @@ void e1000e_ptp_init(struct e1000_adapter *adapter)
 	case e1000_pch_lnp:
 	case e1000_pch_ptp:
 	case e1000_pch_nvp:
-		if (er32(TSYNCRXCTL) & E1000_TSYNCRXCTL_SYSCFI)
-			adapter->ptp_clock_info.max_adj = MAX_PPB_24MHZ;
-		else
-			adapter->ptp_clock_info.max_adj = MAX_PPB_38400KHZ;
-		break;
+		if ((hw->mac.type < e1000_pch_lpt) ||
+		    (er32(TSYNCRXCTL) & E1000_TSYNCRXCTL_SYSCFI)) {
+			adapter->ptp_clock_info.max_adj = 24000000 - 1;
+			break;
+		}
+		fallthrough;
 	case e1000_82574:
 	case e1000_82583:
-		adapter->ptp_clock_info.max_adj = MAX_PPB_25MHZ;
+		adapter->ptp_clock_info.max_adj = 600000000 - 1;
 		break;
 	default:
 		break;

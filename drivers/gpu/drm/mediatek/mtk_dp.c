@@ -2042,12 +2042,12 @@ static enum drm_connector_status mtk_dp_bdg_detect(struct drm_bridge *bridge)
 	return ret;
 }
 
-static const struct drm_edid *mtk_dp_edid_read(struct drm_bridge *bridge,
-					       struct drm_connector *connector)
+static struct edid *mtk_dp_get_edid(struct drm_bridge *bridge,
+				    struct drm_connector *connector)
 {
 	struct mtk_dp *mtk_dp = mtk_dp_from_bridge(bridge);
 	bool enabled = mtk_dp->enabled;
-	const struct drm_edid *drm_edid;
+	struct edid *new_edid = NULL;
 	struct mtk_dp_audio_cfg *audio_caps = &mtk_dp->info.audio_cur_cfg;
 
 	if (!enabled) {
@@ -2055,7 +2055,7 @@ static const struct drm_edid *mtk_dp_edid_read(struct drm_bridge *bridge,
 		mtk_dp_aux_panel_poweron(mtk_dp, true);
 	}
 
-	drm_edid = drm_edid_read_ddc(connector, &mtk_dp->aux.ddc);
+	new_edid = drm_get_edid(connector, &mtk_dp->aux.ddc);
 
 	/*
 	 * Parse capability here to let atomic_get_input_bus_fmts and
@@ -2063,26 +2063,17 @@ static const struct drm_edid *mtk_dp_edid_read(struct drm_bridge *bridge,
 	 */
 	if (mtk_dp_parse_capabilities(mtk_dp)) {
 		drm_err(mtk_dp->drm_dev, "Can't parse capabilities\n");
-		drm_edid_free(drm_edid);
-		drm_edid = NULL;
+		kfree(new_edid);
+		new_edid = NULL;
 	}
 
-	if (drm_edid) {
-		/*
-		 * FIXME: get rid of drm_edid_raw()
-		 */
-		const struct edid *edid = drm_edid_raw(drm_edid);
+	if (new_edid) {
 		struct cea_sad *sads;
 
-		audio_caps->sad_count = drm_edid_to_sad(edid, &sads);
+		audio_caps->sad_count = drm_edid_to_sad(new_edid, &sads);
 		kfree(sads);
 
-		/*
-		 * FIXME: This should use connector->display_info.has_audio from
-		 * a path that has read the EDID and called
-		 * drm_edid_connector_update().
-		 */
-		audio_caps->detect_monitor = drm_detect_monitor_audio(edid);
+		audio_caps->detect_monitor = drm_detect_monitor_audio(new_edid);
 	}
 
 	if (!enabled) {
@@ -2090,7 +2081,7 @@ static const struct drm_edid *mtk_dp_edid_read(struct drm_bridge *bridge,
 		drm_atomic_bridge_chain_post_disable(bridge, connector->state->state);
 	}
 
-	return drm_edid;
+	return new_edid;
 }
 
 static ssize_t mtk_dp_aux_transfer(struct drm_dp_aux *mtk_aux,
@@ -2442,7 +2433,7 @@ static const struct drm_bridge_funcs mtk_dp_bridge_funcs = {
 	.atomic_enable = mtk_dp_bridge_atomic_enable,
 	.atomic_disable = mtk_dp_bridge_atomic_disable,
 	.mode_valid = mtk_dp_bridge_mode_valid,
-	.edid_read = mtk_dp_edid_read,
+	.get_edid = mtk_dp_get_edid,
 	.detect = mtk_dp_bdg_detect,
 };
 

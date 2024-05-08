@@ -6,11 +6,7 @@
 #ifndef BTRFS_XATTR_H
 #define BTRFS_XATTR_H
 
-struct dentry;
-struct inode;
-struct qstr;
-struct xattr_handler;
-struct btrfs_trans_handle;
+#include <linux/xattr.h>
 
 extern const struct xattr_handler * const btrfs_xattr_handlers[];
 

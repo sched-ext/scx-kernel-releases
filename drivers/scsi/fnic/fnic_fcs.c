@@ -1182,7 +1182,7 @@ int fnic_send(struct fc_lport *lp, struct fc_frame *fp)
 
 /**
  * fnic_flush_tx() - send queued frames.
- * @work: pointer to work element
+ * @fnic: fnic device
  *
  * Send frames that were waiting to go out in FC or Ethernet mode.
  * Whenever changing modes we purge queued frames, so these frames should
@@ -1190,9 +1190,8 @@ int fnic_send(struct fc_lport *lp, struct fc_frame *fp)
  *
  * Called without fnic_lock held.
  */
-void fnic_flush_tx(struct work_struct *work)
+void fnic_flush_tx(struct fnic *fnic)
 {
-	struct fnic *fnic = container_of(work, struct fnic, flush_work);
 	struct sk_buff *skb;
 	struct fc_frame *fp;
 

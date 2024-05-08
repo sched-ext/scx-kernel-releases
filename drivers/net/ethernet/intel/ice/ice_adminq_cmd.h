@@ -593,9 +593,8 @@ struct ice_aqc_recipe_data_elem {
 struct ice_aqc_recipe_to_profile {
 	__le16 profile_id;
 	u8 rsvd[6];
-	__le64 recipe_assoc;
+	DECLARE_BITMAP(recipe_assoc, ICE_MAX_NUM_RECIPES);
 };
-static_assert(sizeof(struct ice_aqc_recipe_to_profile) == 16);
 
 /* Add/Update/Remove/Get switch rules (indirect 0x02A0, 0x02A1, 0x02A2, 0x02A3)
  */

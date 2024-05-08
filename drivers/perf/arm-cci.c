@@ -1697,14 +1697,16 @@ error_pmu_init:
 	return ret;
 }
 
-static void cci_pmu_remove(struct platform_device *pdev)
+static int cci_pmu_remove(struct platform_device *pdev)
 {
 	if (!g_cci_pmu)
-		return;
+		return 0;
 
 	cpuhp_remove_state(CPUHP_AP_PERF_ARM_CCI_ONLINE);
 	perf_pmu_unregister(&g_cci_pmu->pmu);
 	g_cci_pmu = NULL;
+
+	return 0;
 }
 
 static struct platform_driver cci_pmu_driver = {
@@ -1714,7 +1716,7 @@ static struct platform_driver cci_pmu_driver = {
 		   .suppress_bind_attrs = true,
 		  },
 	.probe = cci_pmu_probe,
-	.remove_new = cci_pmu_remove,
+	.remove = cci_pmu_remove,
 };
 
 module_platform_driver(cci_pmu_driver);

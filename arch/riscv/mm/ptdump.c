@@ -9,6 +9,7 @@
 #include <linux/seq_file.h>
 #include <linux/ptdump.h>
 
+#include <asm/ptdump.h>
 #include <linux/pgtable.h>
 #include <asm/kasan.h>
 
@@ -335,7 +336,7 @@ static void ptdump_walk(struct seq_file *s, struct ptd_mm_info *pinfo)
 	ptdump_walk_pgd(&st.ptdump, pinfo->mm, NULL);
 }
 
-bool ptdump_check_wx(void)
+void ptdump_check_wx(void)
 {
 	struct pg_state st = {
 		.seq = NULL,
@@ -356,16 +357,11 @@ bool ptdump_check_wx(void)
 
 	ptdump_walk_pgd(&st.ptdump, &init_mm, NULL);
 
-	if (st.wx_pages) {
+	if (st.wx_pages)
 		pr_warn("Checked W+X mappings: failed, %lu W+X pages found\n",
 			st.wx_pages);
-
-		return false;
-	} else {
+	else
 		pr_info("Checked W+X mappings: passed, no W+X pages found\n");
-
-		return true;
-	}
 }
 
 static int ptdump_show(struct seq_file *m, void *v)

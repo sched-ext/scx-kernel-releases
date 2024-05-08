@@ -44,6 +44,8 @@ static struct pci_driver pvpanic_pci_driver = {
 	.name =         "pvpanic-pci",
 	.id_table =     pvpanic_pci_id_tbl,
 	.probe =        pvpanic_pci_probe,
-	.dev_groups =   pvpanic_dev_groups,
+	.driver = {
+		.dev_groups = pvpanic_dev_groups,
+	},
 };
 module_pci_driver(pvpanic_pci_driver);

@@ -88,7 +88,7 @@ void bch2_latency_acct(struct bch_dev *ca, u64 submit_time, int rw)
 
 	bch2_congested_acct(ca, io_latency, now, rw);
 
-	__bch2_time_stats_update(&ca->io_latency[rw].stats, submit_time, now);
+	__bch2_time_stats_update(&ca->io_latency[rw], submit_time, now);
 }
 
 #endif
@@ -530,8 +530,7 @@ static void __bch2_write_index(struct bch_write_op *op)
 
 			bch_err_inum_offset_ratelimited(c,
 				insert->k.p.inode, insert->k.p.offset << 9,
-				"%s write error while doing btree update: %s",
-				op->flags & BCH_WRITE_MOVE ? "move" : "user",
+				"write error while doing btree update: %s",
 				bch2_err_str(ret));
 		}
 
@@ -1068,8 +1067,7 @@ do_write:
 	*_dst = dst;
 	return more;
 csum_err:
-	bch_err(c, "%s writ error: error verifying existing checksum while rewriting existing data (memory corruption?)",
-		op->flags & BCH_WRITE_MOVE ? "move" : "user");
+	bch_err(c, "error verifying existing checksum while rewriting existing data (memory corruption?)");
 	ret = -EIO;
 err:
 	if (to_wbio(dst)->bounce)
@@ -1171,8 +1169,7 @@ static void bch2_nocow_write_convert_unwritten(struct bch_write_op *op)
 
 			bch_err_inum_offset_ratelimited(c,
 				insert->k.p.inode, insert->k.p.offset << 9,
-				"%s write error while doing btree update: %s",
-				op->flags & BCH_WRITE_MOVE ? "move" : "user",
+				"write error while doing btree update: %s",
 				bch2_err_str(ret));
 		}
 
@@ -1452,9 +1449,7 @@ err:
 					bch_err_inum_offset_ratelimited(c,
 						op->pos.inode,
 						op->pos.offset << 9,
-						"%s(): %s error: %s", __func__,
-						op->flags & BCH_WRITE_MOVE ? "move" : "user",
-						bch2_err_str(ret));
+						"%s(): error: %s", __func__, bch2_err_str(ret));
 				op->error = ret;
 				break;
 			}
@@ -1569,7 +1564,6 @@ CLOSURE_CALLBACK(bch2_write)
 	BUG_ON(!op->write_point.v);
 	BUG_ON(bkey_eq(op->pos, POS_MAX));
 
-	op->nr_replicas_required = min_t(unsigned, op->nr_replicas_required, op->nr_replicas);
 	op->start_time = local_clock();
 	bch2_keylist_init(&op->insert_keys, op->inline_keys);
 	wbio_init(bio)->put_bio = false;
@@ -1578,8 +1572,7 @@ CLOSURE_CALLBACK(bch2_write)
 		bch_err_inum_offset_ratelimited(c,
 			op->pos.inode,
 			op->pos.offset << 9,
-			"%s write error: misaligned write",
-			op->flags & BCH_WRITE_MOVE ? "move" : "user");
+			"misaligned write");
 		op->error = -EIO;
 		goto err;
 	}

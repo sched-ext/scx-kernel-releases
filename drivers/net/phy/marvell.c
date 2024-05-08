@@ -919,10 +919,7 @@ static int m88e1111_config_init_1000basex(struct phy_device *phydev)
 	if (extsr < 0)
 		return extsr;
 
-	/* If using copper mode, ensure 1000BaseX auto-negotiation is enabled.
-	 * FIXME: this does not actually enable 1000BaseX auto-negotiation if
-	 * it was previously disabled in the Fiber BMCR!
-	 */
+	/* If using copper mode, ensure 1000BaseX auto-negotiation is enabled */
 	mode = extsr & MII_M1111_HWCFG_MODE_MASK;
 	if (mode == MII_M1111_HWCFG_MODE_COPPER_1000X_NOAN) {
 		err = phy_modify(phydev, MII_M1111_PHY_EXT_SR,
@@ -1464,7 +1461,7 @@ static int m88e1540_get_fld(struct phy_device *phydev, u8 *msecs)
 
 static int m88e1540_set_fld(struct phy_device *phydev, const u8 *msecs)
 {
-	struct ethtool_keee eee;
+	struct ethtool_eee eee;
 	int val, ret;
 
 	if (*msecs == ETHTOOL_PHY_FAST_LINK_DOWN_OFF)

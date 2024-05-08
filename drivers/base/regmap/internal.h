@@ -93,7 +93,6 @@ struct regmap {
 #endif
 
 	unsigned int max_register;
-	bool max_register_is_set;
 	bool (*writeable_reg)(struct device *dev, unsigned int reg);
 	bool (*readable_reg)(struct device *dev, unsigned int reg);
 	bool (*volatile_reg)(struct device *dev, unsigned int reg);

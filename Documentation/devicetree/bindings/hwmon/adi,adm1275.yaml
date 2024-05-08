@@ -33,6 +33,10 @@ properties:
   reg:
     maxItems: 1
 
+  shunt-resistor-micro-ohms:
+    description:
+      Shunt resistor value in micro-Ohm.
+
   adi,volt-curr-sample-average:
     description: |
       Number of samples to be used to report voltage and current values.
@@ -46,7 +50,6 @@ properties:
     enum: [1, 2, 4, 8, 16, 32, 64, 128]
 
 allOf:
-  - $ref: hwmon-common.yaml#
   - if:
       properties:
         compatible:
@@ -104,7 +107,7 @@ required:
   - compatible
   - reg
 
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

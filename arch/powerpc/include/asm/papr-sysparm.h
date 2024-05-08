@@ -32,7 +32,7 @@ typedef struct {
  */
 struct papr_sysparm_buf {
 	__be16 len;
-	u8 val[PAPR_SYSPARM_MAX_OUTPUT];
+	char val[PAPR_SYSPARM_MAX_OUTPUT];
 };
 
 struct papr_sysparm_buf *papr_sysparm_buf_alloc(void);

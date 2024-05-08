@@ -14,7 +14,6 @@
 #include <linux/vm_event_item.h>
 #include <linux/hardirq.h>
 #include <linux/jump_label.h>
-#include <linux/kernel.h>
 #include <linux/page_counter.h>
 #include <linux/vmpressure.h>
 #include <linux/eventfd.h>
@@ -713,16 +712,18 @@ static inline void mem_cgroup_uncharge(struct folio *folio)
 	__mem_cgroup_uncharge(folio);
 }
 
-void __mem_cgroup_uncharge_folios(struct folio_batch *folios);
-static inline void mem_cgroup_uncharge_folios(struct folio_batch *folios)
+void __mem_cgroup_uncharge_list(struct list_head *page_list);
+static inline void mem_cgroup_uncharge_list(struct list_head *page_list)
 {
 	if (mem_cgroup_disabled())
 		return;
-	__mem_cgroup_uncharge_folios(folios);
+	__mem_cgroup_uncharge_list(page_list);
 }
 
 void mem_cgroup_cancel_charge(struct mem_cgroup *memcg, unsigned int nr_pages);
+
 void mem_cgroup_replace_folio(struct folio *old, struct folio *new);
+
 void mem_cgroup_migrate(struct folio *old, struct folio *new);
 
 /**
@@ -1161,7 +1162,7 @@ static inline void memcg_memory_event_mm(struct mm_struct *mm,
 	rcu_read_unlock();
 }
 
-void split_page_memcg(struct page *head, int old_order, int new_order);
+void split_page_memcg(struct page *head, unsigned int nr);
 
 unsigned long mem_cgroup_soft_limit_reclaim(pg_data_t *pgdat, int order,
 						gfp_t gfp_mask,
@@ -1293,7 +1294,7 @@ static inline void mem_cgroup_uncharge(struct folio *folio)
 {
 }
 
-static inline void mem_cgroup_uncharge_folios(struct folio_batch *folios)
+static inline void mem_cgroup_uncharge_list(struct list_head *page_list)
 {
 }
 
@@ -1619,7 +1620,7 @@ void count_memcg_event_mm(struct mm_struct *mm, enum vm_event_item idx)
 {
 }
 
-static inline void split_page_memcg(struct page *head, int old_order, int new_order)
+static inline void split_page_memcg(struct page *head, unsigned int nr)
 {
 }
 
@@ -1693,18 +1694,18 @@ static inline struct lruvec *folio_lruvec_relock_irq(struct folio *folio,
 	return folio_lruvec_lock_irq(folio);
 }
 
-/* Don't lock again iff folio's lruvec locked */
-static inline void folio_lruvec_relock_irqsave(struct folio *folio,
-		struct lruvec **lruvecp, unsigned long *flags)
+/* Don't lock again iff page's lruvec locked */
+static inline struct lruvec *folio_lruvec_relock_irqsave(struct folio *folio,
+		struct lruvec *locked_lruvec, unsigned long *flags)
 {
-	if (*lruvecp) {
-		if (folio_matches_lruvec(folio, *lruvecp))
-			return;
+	if (locked_lruvec) {
+		if (folio_matches_lruvec(folio, locked_lruvec))
+			return locked_lruvec;
 
-		unlock_page_lruvec_irqrestore(*lruvecp, *flags);
+		unlock_page_lruvec_irqrestore(locked_lruvec, *flags);
 	}
 
-	*lruvecp = folio_lruvec_lock_irqsave(folio, flags);
+	return folio_lruvec_lock_irqsave(folio, flags);
 }
 
 #ifdef CONFIG_CGROUP_WRITEBACK

@@ -20,7 +20,6 @@
 #include <linux/ratelimit.h>
 #include <linux/list_lru.h>
 #include <linux/iversion.h>
-#include <linux/rw_hint.h>
 #include <trace/events/writeback.h>
 #include "internal.h"
 
@@ -589,8 +588,7 @@ void dump_mapping(const struct address_space *mapping)
 	}
 
 	dentry_ptr = container_of(dentry_first, struct dentry, d_u.d_alias);
-	if (get_kernel_nofault(dentry, dentry_ptr) ||
-	    !dentry.d_parent || !dentry.d_name.name) {
+	if (get_kernel_nofault(dentry, dentry_ptr)) {
 		pr_warn("aops:%ps ino:%lx invalid dentry:%px\n",
 				a_ops, ino, dentry_ptr);
 		return;
@@ -2033,7 +2031,7 @@ static int __remove_privs(struct mnt_idmap *idmap,
 	return notify_change(idmap, dentry, &newattrs, NULL);
 }
 
-int file_remove_privs_flags(struct file *file, unsigned int flags)
+static int __file_remove_privs(struct file *file, unsigned int flags)
 {
 	struct dentry *dentry = file_dentry(file);
 	struct inode *inode = file_inode(file);
@@ -2058,7 +2056,6 @@ int file_remove_privs_flags(struct file *file, unsigned int flags)
 		inode_has_no_xattr(inode);
 	return error;
 }
-EXPORT_SYMBOL_GPL(file_remove_privs_flags);
 
 /**
  * file_remove_privs - remove special file privileges (suid, capabilities)
@@ -2071,7 +2068,7 @@ EXPORT_SYMBOL_GPL(file_remove_privs_flags);
  */
 int file_remove_privs(struct file *file)
 {
-	return file_remove_privs_flags(file, 0);
+	return __file_remove_privs(file, 0);
 }
 EXPORT_SYMBOL(file_remove_privs);
 
@@ -2164,7 +2161,7 @@ static int file_modified_flags(struct file *file, int flags)
 	 * Clear the security bits if the process is not being run by root.
 	 * This keeps people from modifying setuid and setgid binaries.
 	 */
-	ret = file_remove_privs_flags(file, flags);
+	ret = __file_remove_privs(file, flags);
 	if (ret)
 		return ret;
 
@@ -2288,7 +2285,7 @@ void __init inode_init(void)
 					 sizeof(struct inode),
 					 0,
 					 (SLAB_RECLAIM_ACCOUNT|SLAB_PANIC|
-					 SLAB_ACCOUNT),
+					 SLAB_MEM_SPREAD|SLAB_ACCOUNT),
 					 init_once);
 
 	/* Hash may have been set up in inode_init_early */
@@ -2512,7 +2509,7 @@ struct timespec64 inode_set_ctime_current(struct inode *inode)
 {
 	struct timespec64 now = current_time(inode);
 
-	inode_set_ctime_to_ts(inode, now);
+	inode_set_ctime(inode, now.tv_sec, now.tv_nsec);
 	return now;
 }
 EXPORT_SYMBOL(inode_set_ctime_current);

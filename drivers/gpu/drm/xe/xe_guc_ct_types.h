@@ -73,20 +73,6 @@ struct xe_guc_ct_snapshot {
 };
 
 /**
- * enum xe_guc_ct_state - CT state
- * @XE_GUC_CT_STATE_NOT_INITIALIZED: CT not initialized, messages not expected in this state
- * @XE_GUC_CT_STATE_DISABLED: CT disabled, messages not expected in this state
- * @XE_GUC_CT_STATE_STOPPED: CT stopped, drop messages without errors
- * @XE_GUC_CT_STATE_ENABLED: CT enabled, messages sent / received in this state
- */
-enum xe_guc_ct_state {
-	XE_GUC_CT_STATE_NOT_INITIALIZED = 0,
-	XE_GUC_CT_STATE_DISABLED,
-	XE_GUC_CT_STATE_STOPPED,
-	XE_GUC_CT_STATE_ENABLED,
-};
-
-/**
  * struct xe_guc_ct - GuC command transport (CT) layer
  *
  * Includes a pair of CT buffers for bi-directional communication and tracking
@@ -101,17 +87,17 @@ struct xe_guc_ct {
 	spinlock_t fast_lock;
 	/** @ctbs: buffers for sending and receiving commands */
 	struct {
-		/** @ctbs.send: Host to GuC (H2G, send) channel */
+		/** @send: Host to GuC (H2G, send) channel */
 		struct guc_ctb h2g;
-		/** @ctbs.recv: GuC to Host (G2H, receive) channel */
+		/** @recv: GuC to Host (G2H, receive) channel */
 		struct guc_ctb g2h;
 	} ctbs;
 	/** @g2h_outstanding: number of outstanding G2H */
 	u32 g2h_outstanding;
 	/** @g2h_worker: worker to process G2H messages */
 	struct work_struct g2h_worker;
-	/** @state: CT state */
-	enum xe_guc_ct_state state;
+	/** @enabled: CT enabled */
+	bool enabled;
 	/** @fence_seqno: G2H fence seqno - 16 bits used by CT */
 	u32 fence_seqno;
 	/** @fence_lookup: G2H fence lookup */
