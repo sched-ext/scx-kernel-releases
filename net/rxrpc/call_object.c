@@ -70,9 +70,18 @@ static void rxrpc_call_timer_expired(struct timer_list *t)
 	_enter("%d", call->debug_id);
 
 	if (!__rxrpc_call_is_complete(call)) {
-		trace_rxrpc_timer_expired(call);
+		trace_rxrpc_timer_expired(call, jiffies);
 		rxrpc_poke_call(call, rxrpc_call_poke_timer);
 	}
+}
+
+void rxrpc_reduce_call_timer(struct rxrpc_call *call,
+			     unsigned long expire_at,
+			     unsigned long now,
+			     enum rxrpc_timer_trace why)
+{
+	trace_rxrpc_timer(call, why, now);
+	timer_reduce(&call->timer, expire_at);
 }
 
 static struct lock_class_key rxrpc_call_user_mutex_lock_class_key;
@@ -154,20 +163,12 @@ struct rxrpc_call *rxrpc_alloc_call(struct rxrpc_sock *rx, gfp_t gfp,
 	spin_lock_init(&call->notify_lock);
 	spin_lock_init(&call->tx_lock);
 	refcount_set(&call->ref, 1);
-	call->debug_id		= debug_id;
-	call->tx_total_len	= -1;
-	call->next_rx_timo	= 20 * HZ;
-	call->next_req_timo	= 1 * HZ;
-	call->ackr_window	= 1;
-	call->ackr_wtop		= 1;
-	call->delay_ack_at	= KTIME_MAX;
-	call->ack_lost_at	= KTIME_MAX;
-	call->resend_at		= KTIME_MAX;
-	call->ping_at		= KTIME_MAX;
-	call->keepalive_at	= KTIME_MAX;
-	call->expect_rx_by	= KTIME_MAX;
-	call->expect_req_by	= KTIME_MAX;
-	call->expect_term_by	= KTIME_MAX;
+	call->debug_id = debug_id;
+	call->tx_total_len = -1;
+	call->next_rx_timo = 20 * HZ;
+	call->next_req_timo = 1 * HZ;
+	call->ackr_window = 1;
+	call->ackr_wtop = 1;
 
 	memset(&call->sock_node, 0xed, sizeof(call->sock_node));
 
@@ -225,11 +226,11 @@ static struct rxrpc_call *rxrpc_alloc_client_call(struct rxrpc_sock *rx,
 		__set_bit(RXRPC_CALL_EXCLUSIVE, &call->flags);
 
 	if (p->timeouts.normal)
-		call->next_rx_timo = min(p->timeouts.normal, 1);
+		call->next_rx_timo = min(msecs_to_jiffies(p->timeouts.normal), 1UL);
 	if (p->timeouts.idle)
-		call->next_req_timo = min(p->timeouts.idle, 1);
+		call->next_req_timo = min(msecs_to_jiffies(p->timeouts.idle), 1UL);
 	if (p->timeouts.hard)
-		call->hard_timo = p->timeouts.hard;
+		call->hard_timo = p->timeouts.hard * HZ;
 
 	ret = rxrpc_init_client_call_security(call);
 	if (ret < 0) {
@@ -252,13 +253,18 @@ static struct rxrpc_call *rxrpc_alloc_client_call(struct rxrpc_sock *rx,
  */
 void rxrpc_start_call_timer(struct rxrpc_call *call)
 {
-	if (call->hard_timo) {
-		ktime_t delay = ms_to_ktime(call->hard_timo * 1000);
+	unsigned long now = jiffies;
+	unsigned long j = now + MAX_JIFFY_OFFSET;
 
-		call->expect_term_by = ktime_add(ktime_get_real(), delay);
-		trace_rxrpc_timer_set(call, delay, rxrpc_timer_trace_hard);
-	}
-	call->timer.expires = jiffies;
+	call->delay_ack_at = j;
+	call->ack_lost_at = j;
+	call->resend_at = j;
+	call->ping_at = j;
+	call->keepalive_at = j;
+	call->expect_rx_by = j;
+	call->expect_req_by = j;
+	call->expect_term_by = j + call->hard_timo;
+	call->timer.expires = now;
 }
 
 /*
@@ -680,7 +686,6 @@ static void rxrpc_destroy_call(struct work_struct *work)
 
 	del_timer_sync(&call->timer);
 
-	rxrpc_free_skb(call->cong_last_nack, rxrpc_skb_put_last_nack);
 	rxrpc_cleanup_ring(call);
 	while ((txb = list_first_entry_or_null(&call->tx_sendmsg,
 					       struct rxrpc_txbuf, call_link))) {

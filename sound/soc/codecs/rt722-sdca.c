@@ -35,8 +35,8 @@ int rt722_sdca_index_write(struct rt722_sdca_priv *rt722,
 	ret = regmap_write(regmap, addr, value);
 	if (ret < 0)
 		dev_err(&rt722->slave->dev,
-			"%s: Failed to set private value: %06x <= %04x ret=%d\n",
-			__func__, addr, value, ret);
+			"Failed to set private value: %06x <= %04x ret=%d\n",
+			addr, value, ret);
 
 	return ret;
 }
@@ -51,8 +51,8 @@ int rt722_sdca_index_read(struct rt722_sdca_priv *rt722,
 	ret = regmap_read(regmap, addr, value);
 	if (ret < 0)
 		dev_err(&rt722->slave->dev,
-			"%s: Failed to get private value: %06x => %04x ret=%d\n",
-			__func__, addr, *value, ret);
+			"Failed to get private value: %06x => %04x ret=%d\n",
+			addr, *value, ret);
 
 	return ret;
 }
@@ -663,8 +663,7 @@ static int rt722_sdca_dmic_set_gain_put(struct snd_kcontrol *kcontrol,
 	for (i = 0; i < p->count; i++) {
 		err = regmap_write(rt722->mbq_regmap, p->reg_base + i, gain_val[i]);
 		if (err < 0)
-			dev_err(&rt722->slave->dev, "%s: %#08x can't be set\n",
-				__func__, p->reg_base + i);
+			dev_err(&rt722->slave->dev, "%#08x can't be set\n", p->reg_base + i);
 	}
 
 	return changed;
@@ -1212,13 +1211,13 @@ static int rt722_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	retval = sdw_stream_add_slave(rt722->slave, &stream_config,
 					&port_config, 1, sdw_stream);
 	if (retval) {
-		dev_err(dai->dev, "%s: Unable to configure port\n", __func__);
+		dev_err(dai->dev, "Unable to configure port\n");
 		return retval;
 	}
 
 	if (params_channels(params) > 16) {
-		dev_err(component->dev, "%s: Unsupported channels %d\n",
-			__func__, params_channels(params));
+		dev_err(component->dev, "Unsupported channels %d\n",
+			params_channels(params));
 		return -EINVAL;
 	}
 
@@ -1237,8 +1236,8 @@ static int rt722_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 		sampling_rate = RT722_SDCA_RATE_192000HZ;
 		break;
 	default:
-		dev_err(component->dev, "%s: Rate %d is not supported\n",
-			__func__, params_rate(params));
+		dev_err(component->dev, "Rate %d is not supported\n",
+			params_rate(params));
 		return -EINVAL;
 	}
 
@@ -1330,7 +1329,7 @@ static struct snd_soc_dai_driver rt722_sdca_dai[] = {
 		.capture = {
 			.stream_name = "DP6 DMic Capture",
 			.channels_min = 1,
-			.channels_max = 4,
+			.channels_max = 2,
 			.rates = RT722_STEREO_RATES,
 			.formats = RT722_FORMATS,
 		},
@@ -1439,12 +1438,9 @@ static void rt722_sdca_jack_preset(struct rt722_sdca_priv *rt722)
 	int loop_check, chk_cnt = 100, ret;
 	unsigned int calib_status = 0;
 
-	/* Config analog bias */
-	rt722_sdca_index_write(rt722, RT722_VENDOR_REG, RT722_ANALOG_BIAS_CTL3,
-		0xa081);
-	/* GE related settings */
-	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_GE_RELATED_CTL2,
-		0xa009);
+	/* Read eFuse */
+	rt722_sdca_index_write(rt722, RT722_VENDOR_SPK_EFUSE, RT722_DC_CALIB_CTRL,
+		0x4808);
 	/* Button A, B, C, D bypass mode */
 	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_UMP_HID_CTL4,
 		0xcf00);
@@ -1478,6 +1474,9 @@ static void rt722_sdca_jack_preset(struct rt722_sdca_priv *rt722)
 		if ((calib_status & 0x0040) == 0x0)
 			break;
 	}
+	/* Release HP-JD, EN_CBJ_TIE_GL/R open, en_osw gating auto done bit */
+	rt722_sdca_index_write(rt722, RT722_VENDOR_REG, RT722_DIGITAL_MISC_CTRL4,
+		0x0010);
 	/* Set ADC09 power entity floating control */
 	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_ADC0A_08_PDE_FLOAT_CTL,
 		0x2a12);
@@ -1490,21 +1489,8 @@ static void rt722_sdca_jack_preset(struct rt722_sdca_priv *rt722)
 	/* Set DAC03 and HP power entity floating control */
 	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_DAC03_HP_PDE_FLOAT_CTL,
 		0x4040);
-	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_ENT_FLOAT_CTRL_1,
-		0x4141);
-	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_FLOAT_CTRL_1,
-		0x0101);
 	/* Fine tune PDE40 latency */
 	regmap_write(rt722->regmap, 0x2f58, 0x07);
-	regmap_write(rt722->regmap, 0x2f03, 0x06);
-	/* MIC VRefo */
-	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
-		RT722_COMBO_JACK_AUTO_CTL1, 0x0200, 0x0200);
-	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
-		RT722_VREFO_GAT, 0x4000, 0x4000);
-	/* Release HP-JD, EN_CBJ_TIE_GL/R open, en_osw gating auto done bit */
-	rt722_sdca_index_write(rt722, RT722_VENDOR_REG, RT722_DIGITAL_MISC_CTRL4,
-		0x0010);
 }
 
 int rt722_sdca_io_init(struct device *dev, struct sdw_slave *slave)

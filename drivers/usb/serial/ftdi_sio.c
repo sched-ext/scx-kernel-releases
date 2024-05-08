@@ -1077,8 +1077,6 @@ static const struct usb_device_id id_table_combined[] = {
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
 	{ USB_DEVICE(FTDI_VID, FTDI_FALCONIA_JTAG_UNBUF_PID),
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
-	/* GMC devices */
-	{ USB_DEVICE(GMC_VID, GMC_Z216C_PID) },
 	{ }					/* Terminating entry */
 };
 
@@ -2612,7 +2610,7 @@ static void ftdi_set_termios(struct tty_struct *tty,
 	struct device *ddev = &port->dev;
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
 	struct ktermios *termios = &tty->termios;
-	unsigned int cflag;
+	unsigned int cflag = termios->c_cflag;
 	u16 value, index;
 	int ret;
 

@@ -29,6 +29,7 @@
 #include <asm/io.h>
 #include <asm/numa.h>
 #include <asm/pgtable.h>
+#include <asm/ptdump.h>
 #include <asm/sections.h>
 #include <asm/soc.h>
 #include <asm/tlbflush.h>
@@ -231,7 +232,7 @@ static void __init setup_bootmem(void)
 	 * In 64-bit, any use of __va/__pa before this point is wrong as we
 	 * did not know the start of DRAM before.
 	 */
-	if (IS_ENABLED(CONFIG_64BIT) && IS_ENABLED(CONFIG_MMU))
+	if (IS_ENABLED(CONFIG_64BIT))
 		kernel_map.va_pa_offset = PAGE_OFFSET - phys_ram_base;
 
 	/*
@@ -722,6 +723,8 @@ void mark_rodata_ro(void)
 	if (IS_ENABLED(CONFIG_64BIT))
 		set_kernel_memory(lm_alias(__start_rodata), lm_alias(_data),
 				  set_memory_ro);
+
+	debug_checkwx();
 }
 #else
 static __init pgprot_t pgprot_from_va(uintptr_t va)
@@ -763,11 +766,6 @@ static int __init print_no5lvl(char *p)
 	return 0;
 }
 early_param("no5lvl", print_no5lvl);
-
-static void __init set_mmap_rnd_bits_max(void)
-{
-	mmap_rnd_bits_max = MMAP_VA_BITS - PAGE_SHIFT - 3;
-}
 
 /*
  * There is a simple way to determine if 4-level is supported by the
@@ -1083,7 +1081,6 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
 
 #if defined(CONFIG_64BIT) && !defined(CONFIG_XIP_KERNEL)
 	set_satp_mode(dtb_pa);
-	set_mmap_rnd_bits_max();
 #endif
 
 	/*
@@ -1361,7 +1358,7 @@ static void __init arch_reserve_crashkernel(void)
 	bool high = false;
 	int ret;
 
-	if (!IS_ENABLED(CONFIG_CRASH_RESERVE))
+	if (!IS_ENABLED(CONFIG_KEXEC_CORE))
 		return;
 
 	ret = parse_crashkernel(cmdline, memblock_phys_mem_size(),
@@ -1388,10 +1385,6 @@ void __init misc_mem_init(void)
 	early_memtest(min_low_pfn << PAGE_SHIFT, max_low_pfn << PAGE_SHIFT);
 	arch_numa_init();
 	sparse_init();
-#ifdef CONFIG_SPARSEMEM_VMEMMAP
-	/* The entire VMEMMAP region has been populated. Flush TLB for this region */
-	local_flush_tlb_kernel_range(VMEMMAP_START, VMEMMAP_END);
-#endif
 	zone_sizes_init();
 	arch_reserve_crashkernel();
 	memblock_dump_all();

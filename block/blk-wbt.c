@@ -29,7 +29,6 @@
 #include "blk-wbt.h"
 #include "blk-rq-qos.h"
 #include "elevator.h"
-#include "blk.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/wbt.h>
@@ -164,9 +163,9 @@ static void wb_timestamp(struct rq_wb *rwb, unsigned long *var)
  */
 static bool wb_recent_wait(struct rq_wb *rwb)
 {
-	struct backing_dev_info *bdi = rwb->rqos.disk->bdi;
+	struct bdi_writeback *wb = &rwb->rqos.disk->bdi->wb;
 
-	return time_before(jiffies, bdi->last_bdp_sleep + HZ);
+	return time_before(jiffies, wb->dirty_sleep + HZ);
 }
 
 static inline struct rq_wait *get_rq_wait(struct rq_wb *rwb,
@@ -275,12 +274,13 @@ static inline bool stat_sample_valid(struct blk_rq_stat *stat)
 
 static u64 rwb_sync_issue_lat(struct rq_wb *rwb)
 {
-	u64 issue = READ_ONCE(rwb->sync_issue);
+	u64 now, issue = READ_ONCE(rwb->sync_issue);
 
 	if (!issue || !rwb->sync_cookie)
 		return 0;
 
-	return blk_time_get_ns() - issue;
+	now = ktime_to_ns(ktime_get());
+	return now - issue;
 }
 
 static inline unsigned int wbt_inflight(struct rq_wb *rwb)

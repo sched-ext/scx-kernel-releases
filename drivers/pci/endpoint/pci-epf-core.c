@@ -17,7 +17,7 @@
 
 static DEFINE_MUTEX(pci_epf_mutex);
 
-static const struct bus_type pci_epf_bus_type;
+static struct bus_type pci_epf_bus_type;
 static const struct device_type pci_epf_type;
 
 /**
@@ -251,17 +251,14 @@ EXPORT_SYMBOL_GPL(pci_epf_free_space);
  * @epf: the EPF device to whom allocate the memory
  * @size: the size of the memory that has to be allocated
  * @bar: the BAR number corresponding to the allocated register space
- * @epc_features: the features provided by the EPC specific to this EPF
+ * @align: alignment size for the allocation region
  * @type: Identifies if the allocation is for primary EPC or secondary EPC
  *
  * Invoke to allocate memory for the PCI EPF register space.
  */
 void *pci_epf_alloc_space(struct pci_epf *epf, size_t size, enum pci_barno bar,
-			  const struct pci_epc_features *epc_features,
-			  enum pci_epc_interface_type type)
+			  size_t align, enum pci_epc_interface_type type)
 {
-	u64 bar_fixed_size = epc_features->bar[bar].fixed_size;
-	size_t align = epc_features->align;
 	struct pci_epf_bar *epf_bar;
 	dma_addr_t phys_addr;
 	struct pci_epc *epc;
@@ -270,15 +267,6 @@ void *pci_epf_alloc_space(struct pci_epf *epf, size_t size, enum pci_barno bar,
 
 	if (size < 128)
 		size = 128;
-
-	if (epc_features->bar[bar].type == BAR_FIXED && bar_fixed_size) {
-		if (size > bar_fixed_size) {
-			dev_err(&epf->dev,
-				"requested BAR size is larger than fixed size\n");
-			return NULL;
-		}
-		size = bar_fixed_size;
-	}
 
 	if (align)
 		size = ALIGN(size, align);
@@ -519,7 +507,7 @@ static void pci_epf_device_remove(struct device *dev)
 	epf->driver = NULL;
 }
 
-static const struct bus_type pci_epf_bus_type = {
+static struct bus_type pci_epf_bus_type = {
 	.name		= "pci-epf",
 	.match		= pci_epf_device_match,
 	.probe		= pci_epf_device_probe,

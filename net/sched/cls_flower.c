@@ -2460,11 +2460,8 @@ unbind_filter:
 	}
 
 errout_idr:
-	if (!fold) {
-		spin_lock(&tp->lock);
+	if (!fold)
 		idr_remove(&head->handle_idr, fnew->handle);
-		spin_unlock(&tp->lock);
-	}
 	__fl_put(fnew);
 errout_tb:
 	kfree(tb);
@@ -3659,7 +3656,6 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.owner		= THIS_MODULE,
 	.flags		= TCF_PROTO_OPS_DOIT_UNLOCKED,
 };
-MODULE_ALIAS_NET_CLS("flower");
 
 static int __init cls_fl_init(void)
 {

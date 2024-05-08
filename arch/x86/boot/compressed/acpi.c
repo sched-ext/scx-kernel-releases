@@ -5,8 +5,6 @@
 #include "../string.h"
 #include "efi.h"
 
-#include <asm/bootparam.h>
-
 #include <linux/numa.h>
 
 /*

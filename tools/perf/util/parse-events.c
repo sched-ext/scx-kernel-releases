@@ -2181,53 +2181,50 @@ int parse_event(struct evlist *evlist, const char *str)
 	return ret;
 }
 
-struct parse_events_error_entry {
-	/** @list: The list the error is part of. */
-	struct list_head list;
-	/** @idx: index in the parsed string */
-	int   idx;
-	/** @str: string to display at the index */
-	char *str;
-	/** @help: optional help string */
-	char *help;
-};
-
 void parse_events_error__init(struct parse_events_error *err)
 {
-	INIT_LIST_HEAD(&err->list);
+	bzero(err, sizeof(*err));
 }
 
 void parse_events_error__exit(struct parse_events_error *err)
 {
-	struct parse_events_error_entry *pos, *tmp;
-
-	list_for_each_entry_safe(pos, tmp, &err->list, list) {
-		zfree(&pos->str);
-		zfree(&pos->help);
-		list_del_init(&pos->list);
-		free(pos);
-	}
+	zfree(&err->str);
+	zfree(&err->help);
+	zfree(&err->first_str);
+	zfree(&err->first_help);
 }
 
 void parse_events_error__handle(struct parse_events_error *err, int idx,
 				char *str, char *help)
 {
-	struct parse_events_error_entry *entry;
-
 	if (WARN(!str || !err, "WARNING: failed to provide error string or struct\n"))
 		goto out_free;
-
-	entry = zalloc(sizeof(*entry));
-	if (!entry) {
-		pr_err("Failed to allocate memory for event parsing error: %s (%s)\n",
-			str, help ?: "<no help>");
-		goto out_free;
+	switch (err->num_errors) {
+	case 0:
+		err->idx = idx;
+		err->str = str;
+		err->help = help;
+		break;
+	case 1:
+		err->first_idx = err->idx;
+		err->idx = idx;
+		err->first_str = err->str;
+		err->str = str;
+		err->first_help = err->help;
+		err->help = help;
+		break;
+	default:
+		pr_debug("Multiple errors dropping message: %s (%s)\n",
+			err->str, err->help ?: "<no help>");
+		free(err->str);
+		err->str = str;
+		free(err->help);
+		err->help = help;
+		break;
 	}
-	entry->idx = idx;
-	entry->str = str;
-	entry->help = help;
-	list_add(&entry->list, &err->list);
+	err->num_errors++;
 	return;
+
 out_free:
 	free(str);
 	free(help);
@@ -2297,34 +2294,19 @@ static void __parse_events_error__print(int err_idx, const char *err_str,
 	}
 }
 
-void parse_events_error__print(const struct parse_events_error *err,
+void parse_events_error__print(struct parse_events_error *err,
 			       const char *event)
 {
-	struct parse_events_error_entry *pos;
-	bool first = true;
+	if (!err->num_errors)
+		return;
 
-	list_for_each_entry(pos, &err->list, list) {
-		if (!first)
-			fputs("\n", stderr);
-		__parse_events_error__print(pos->idx, pos->str, pos->help, event);
-		first = false;
+	__parse_events_error__print(err->idx, err->str, err->help, event);
+
+	if (err->num_errors > 1) {
+		fputs("\nInitial error:\n", stderr);
+		__parse_events_error__print(err->first_idx, err->first_str,
+					err->first_help, event);
 	}
-}
-
-/*
- * In the list of errors err, do any of the error strings (str) contain the
- * given needle string?
- */
-bool parse_events_error__contains(const struct parse_events_error *err,
-				  const char *needle)
-{
-	struct parse_events_error_entry *pos;
-
-	list_for_each_entry(pos, &err->list, list) {
-		if (strstr(pos->str, needle) != NULL)
-			return true;
-	}
-	return false;
 }
 
 #undef MAX_WIDTH

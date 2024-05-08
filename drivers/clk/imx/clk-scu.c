@@ -712,13 +712,17 @@ struct clk_hw *imx_clk_scu_alloc_dev(const char *name,
 	}
 
 	ret = platform_device_add_data(pdev, &clk, sizeof(clk));
-	if (ret)
-		goto put_device;
+	if (ret) {
+		platform_device_put(pdev);
+		return ERR_PTR(ret);
+	}
 
 	ret = driver_set_override(&pdev->dev, &pdev->driver_override,
 				  "imx-scu-clk", strlen("imx-scu-clk"));
-	if (ret)
-		goto put_device;
+	if (ret) {
+		platform_device_put(pdev);
+		return ERR_PTR(ret);
+	}
 
 	ret = imx_clk_scu_attach_pd(&pdev->dev, rsrc_id);
 	if (ret)
@@ -726,15 +730,13 @@ struct clk_hw *imx_clk_scu_alloc_dev(const char *name,
 			name, ret);
 
 	ret = platform_device_add(pdev);
-	if (ret)
-		goto put_device;
+	if (ret) {
+		platform_device_put(pdev);
+		return ERR_PTR(ret);
+	}
 
 	/* For API backwards compatiblilty, simply return NULL for success */
 	return NULL;
-
-put_device:
-	platform_device_put(pdev);
-	return ERR_PTR(ret);
 }
 
 void imx_clk_scu_unregister(void)

@@ -718,7 +718,7 @@ static const struct net_device_ops eth_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static const struct device_type gadget_type = {
+static struct device_type gadget_type = {
 	.name	= "gadget",
 };
 

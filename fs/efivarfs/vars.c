@@ -361,6 +361,7 @@ static void dup_variable_bug(efi_char16_t *str16, efi_guid_t *vendor_guid,
  * efivar_init - build the initial list of EFI variables
  * @func: callback function to invoke for every variable
  * @data: function-specific data to pass to @func
+ * @duplicates: error if we encounter duplicates on @head?
  * @head: initialised head of variable list
  *
  * Get every EFI variable from the firmware and invoke @func. @func
@@ -370,9 +371,9 @@ static void dup_variable_bug(efi_char16_t *str16, efi_guid_t *vendor_guid,
  */
 int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *,
 			    struct list_head *),
-		void *data, struct list_head *head)
+		void *data, bool duplicates, struct list_head *head)
 {
-	unsigned long variable_name_size = 512;
+	unsigned long variable_name_size = 1024;
 	efi_char16_t *variable_name;
 	efi_status_t status;
 	efi_guid_t vendor_guid;
@@ -389,13 +390,12 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *,
 		goto free;
 
 	/*
-	 * A small set of old UEFI implementations reject sizes
-	 * above a certain threshold, the lowest seen in the wild
-	 * is 512.
+	 * Per EFI spec, the maximum storage allocated for both
+	 * the variable name and variable data is 1024 bytes.
 	 */
 
 	do {
-		variable_name_size = 512;
+		variable_name_size = 1024;
 
 		status = efivar_get_next_variable(&variable_name_size,
 						  variable_name,
@@ -413,7 +413,8 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *,
 			 * we'll ever see a different variable name,
 			 * and may end up looping here forever.
 			 */
-			if (variable_is_present(variable_name, &vendor_guid,
+			if (duplicates &&
+			    variable_is_present(variable_name, &vendor_guid,
 						head)) {
 				dup_variable_bug(variable_name, &vendor_guid,
 						 variable_name_size);
@@ -431,13 +432,9 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *,
 			break;
 		case EFI_NOT_FOUND:
 			break;
-		case EFI_BUFFER_TOO_SMALL:
-			pr_warn("efivars: Variable name size exceeds maximum (%lu > 512)\n",
-				variable_name_size);
-			status = EFI_NOT_FOUND;
-			break;
 		default:
-			pr_warn("efivars: get_next_variable: status=%lx\n", status);
+			printk(KERN_WARNING "efivars: get_next_variable: status=%lx\n",
+				status);
 			status = EFI_NOT_FOUND;
 			break;
 		}

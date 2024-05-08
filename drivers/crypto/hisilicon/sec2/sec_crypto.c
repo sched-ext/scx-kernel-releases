@@ -118,7 +118,7 @@ struct sec_aead {
 };
 
 /* Get an en/de-cipher queue cyclically to balance load over queues of TFM */
-static inline u32 sec_alloc_queue_id(struct sec_ctx *ctx, struct sec_req *req)
+static inline int sec_alloc_queue_id(struct sec_ctx *ctx, struct sec_req *req)
 {
 	if (req->c_req.encrypt)
 		return (u32)atomic_inc_return(&ctx->enc_qcyclic) %
@@ -485,7 +485,8 @@ static void sec_alg_resource_free(struct sec_ctx *ctx,
 		sec_free_mac_resource(dev, qp_ctx->res);
 }
 
-static int sec_alloc_qp_ctx_resource(struct sec_ctx *ctx, struct sec_qp_ctx *qp_ctx)
+static int sec_alloc_qp_ctx_resource(struct hisi_qm *qm, struct sec_ctx *ctx,
+				     struct sec_qp_ctx *qp_ctx)
 {
 	u16 q_depth = qp_ctx->qp->sq_depth;
 	struct device *dev = ctx->dev;
@@ -540,7 +541,8 @@ static void sec_free_qp_ctx_resource(struct sec_ctx *ctx, struct sec_qp_ctx *qp_
 	kfree(qp_ctx->req_list);
 }
 
-static int sec_create_qp_ctx(struct sec_ctx *ctx, int qp_ctx_id)
+static int sec_create_qp_ctx(struct hisi_qm *qm, struct sec_ctx *ctx,
+			     int qp_ctx_id, int alg_type)
 {
 	struct sec_qp_ctx *qp_ctx;
 	struct hisi_qp *qp;
@@ -559,7 +561,7 @@ static int sec_create_qp_ctx(struct sec_ctx *ctx, int qp_ctx_id)
 	idr_init(&qp_ctx->req_idr);
 	INIT_LIST_HEAD(&qp_ctx->backlog);
 
-	ret = sec_alloc_qp_ctx_resource(ctx, qp_ctx);
+	ret = sec_alloc_qp_ctx_resource(qm, ctx, qp_ctx);
 	if (ret)
 		goto err_destroy_idr;
 
@@ -612,7 +614,7 @@ static int sec_ctx_base_init(struct sec_ctx *ctx)
 	}
 
 	for (i = 0; i < sec->ctx_q_num; i++) {
-		ret = sec_create_qp_ctx(ctx, i);
+		ret = sec_create_qp_ctx(&sec->qm, ctx, i, 0);
 		if (ret)
 			goto err_sec_release_qp_ctx;
 	}
@@ -748,7 +750,9 @@ static void sec_skcipher_uninit(struct crypto_skcipher *tfm)
 	sec_ctx_base_uninit(ctx);
 }
 
-static int sec_skcipher_3des_setkey(struct crypto_skcipher *tfm, const u8 *key, const u32 keylen)
+static int sec_skcipher_3des_setkey(struct crypto_skcipher *tfm, const u8 *key,
+				    const u32 keylen,
+				    const enum sec_cmode c_mode)
 {
 	struct sec_ctx *ctx = crypto_skcipher_ctx(tfm);
 	struct sec_cipher_ctx *c_ctx = &ctx->c_ctx;
@@ -839,7 +843,7 @@ static int sec_skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
 
 	switch (c_alg) {
 	case SEC_CALG_3DES:
-		ret = sec_skcipher_3des_setkey(tfm, key, keylen);
+		ret = sec_skcipher_3des_setkey(tfm, key, keylen, c_mode);
 		break;
 	case SEC_CALG_AES:
 	case SEC_CALG_SM4:
@@ -1367,7 +1371,7 @@ static int sec_skcipher_bd_fill_v3(struct sec_ctx *ctx, struct sec_req *req)
 	sec_sqe3->bd_param = cpu_to_le32(bd_param);
 
 	sec_sqe3->c_len_ivin |= cpu_to_le32(c_req->c_len);
-	sec_sqe3->tag = cpu_to_le64((unsigned long)req);
+	sec_sqe3->tag = cpu_to_le64(req);
 
 	return 0;
 }
@@ -2141,8 +2145,8 @@ static int sec_skcipher_decrypt(struct skcipher_request *sk_req)
 	return sec_skcipher_crypto(sk_req, false);
 }
 
-#define SEC_SKCIPHER_ALG(sec_cra_name, sec_set_key, \
-	sec_min_key_size, sec_max_key_size, blk_size, iv_size)\
+#define SEC_SKCIPHER_GEN_ALG(sec_cra_name, sec_set_key, sec_min_key_size, \
+	sec_max_key_size, ctx_init, ctx_exit, blk_size, iv_size)\
 {\
 	.base = {\
 		.cra_name = sec_cra_name,\
@@ -2154,8 +2158,8 @@ static int sec_skcipher_decrypt(struct skcipher_request *sk_req)
 		.cra_ctxsize = sizeof(struct sec_ctx),\
 		.cra_module = THIS_MODULE,\
 	},\
-	.init = sec_skcipher_ctx_init,\
-	.exit = sec_skcipher_ctx_exit,\
+	.init = ctx_init,\
+	.exit = ctx_exit,\
 	.setkey = sec_set_key,\
 	.decrypt = sec_skcipher_decrypt,\
 	.encrypt = sec_skcipher_encrypt,\
@@ -2163,6 +2167,11 @@ static int sec_skcipher_decrypt(struct skcipher_request *sk_req)
 	.max_keysize = sec_max_key_size,\
 	.ivsize = iv_size,\
 }
+
+#define SEC_SKCIPHER_ALG(name, key_func, min_key_size, \
+	max_key_size, blk_size, iv_size) \
+	SEC_SKCIPHER_GEN_ALG(name, key_func, min_key_size, max_key_size, \
+	sec_skcipher_ctx_init, sec_skcipher_ctx_exit, blk_size, iv_size)
 
 static struct sec_skcipher sec_skciphers[] = {
 	{

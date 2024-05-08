@@ -602,8 +602,6 @@ iterate_address:
 		goto wait_for_more_probe_results;
 
 	alist = op->estate->addresses;
-	best_prio = -1;
-	addr_index = 0;
 	for (i = 0; i < alist->nr_addrs; i++) {
 		if (alist->addrs[i].prio > best_prio) {
 			addr_index = i;
@@ -611,7 +609,9 @@ iterate_address:
 		}
 	}
 
-	alist->preferred = addr_index;
+	addr_index = READ_ONCE(alist->preferred);
+	if (!test_bit(addr_index, &set))
+		addr_index = __ffs(set);
 
 	op->addr_index = addr_index;
 	set_bit(addr_index, &op->addr_tried);
@@ -656,6 +656,12 @@ wait_for_more_probe_results:
 next_server:
 	trace_afs_rotate(op, afs_rotate_trace_next_server, 0);
 	_debug("next");
+	ASSERT(op->estate);
+	alist = op->estate->addresses;
+	if (op->call_responded &&
+	    op->addr_index != READ_ONCE(alist->preferred) &&
+	    test_bit(alist->preferred, &op->addr_tried))
+		WRITE_ONCE(alist->preferred, op->addr_index);
 	op->estate = NULL;
 	goto pick_server;
 
@@ -684,7 +690,14 @@ no_more_servers:
 failed:
 	trace_afs_rotate(op, afs_rotate_trace_failed, 0);
 	op->flags |= AFS_OPERATION_STOP;
-	op->estate = NULL;
+	if (op->estate) {
+		alist = op->estate->addresses;
+		if (op->call_responded &&
+		    op->addr_index != READ_ONCE(alist->preferred) &&
+		    test_bit(alist->preferred, &op->addr_tried))
+			WRITE_ONCE(alist->preferred, op->addr_index);
+		op->estate = NULL;
+	}
 	_leave(" = f [failed %d]", afs_op_error(op));
 	return false;
 }

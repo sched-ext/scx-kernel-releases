@@ -99,8 +99,9 @@ CVE assignment
 The security team does not assign CVEs, nor do we require them for
 reports or fixes, as this can needlessly complicate the process and may
 delay the bug handling.  If a reporter wishes to have a CVE identifier
-assigned for a confirmed issue, they can contact the :doc:`kernel CVE
-assignment team<../process/cve>` to obtain one.
+assigned, they should find one by themselves, for example by contacting
+MITRE directly.  However under no circumstances will a patch inclusion
+be delayed to wait for a CVE identifier to arrive.
 
 Non-disclosure agreements
 -------------------------

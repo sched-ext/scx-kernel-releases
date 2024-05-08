@@ -144,7 +144,7 @@ class SpecEnumSet(SpecElement):
 
 
 class SpecAttr(SpecElement):
-    """ Single Netlink attribute type
+    """ Single Netlink atttribute type
 
     Represents a single attribute type within an attr space.
 
@@ -248,7 +248,6 @@ class SpecStructMember(SpecElement):
         len         integer, optional byte length of binary types
         display_hint  string, hint to help choose format specifier
                       when displaying the value
-        struct      string, name of nested struct type
     """
     def __init__(self, family, yaml):
         super().__init__(family, yaml)
@@ -257,7 +256,6 @@ class SpecStructMember(SpecElement):
         self.enum = yaml.get('enum')
         self.len = yaml.get('len')
         self.display_hint = yaml.get('display-hint')
-        self.struct = yaml.get('struct')
 
 
 class SpecStruct(SpecElement):
@@ -308,9 +306,10 @@ class SpecSubMessage(SpecElement):
 
 
 class SpecSubMessageFormat(SpecElement):
-    """ Netlink sub-message format definition
+    """ Netlink sub-message definition
 
-    Represents a single format for a sub-message.
+    Represents a set of sub-message formats for polymorphic nlattrs
+    that contain type-specific sub messages.
 
     Attributes:
         value         attribute value to match against type selector
@@ -418,7 +417,6 @@ class SpecFamily(SpecElement):
         consts     dict of all constants/enums
         fixed_header  string, optional name of family default fixed header struct
         mcast_groups  dict of all multicast groups (index by name)
-        kernel_family   dict of kernel family attributes
     """
     def __init__(self, spec_path, schema_path=None, exclude_ops=None):
         with open(spec_path, "r") as stream:
@@ -462,7 +460,6 @@ class SpecFamily(SpecElement):
         self.ntfs = collections.OrderedDict()
         self.consts = collections.OrderedDict()
         self.mcast_groups = collections.OrderedDict()
-        self.kernel_family = collections.OrderedDict(self.yaml.get('kernel-family', {}))
 
         last_exception = None
         while len(self._resolution_list) > 0:

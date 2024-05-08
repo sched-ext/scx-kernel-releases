@@ -636,11 +636,11 @@ static int hwicap_setup(struct platform_device *pdev, int id,
 		retval = -ENOMEM;
 		goto failed;
 	}
-	dev_set_drvdata(dev, drvdata);
+	dev_set_drvdata(dev, (void *)drvdata);
 
 	drvdata->base_address = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(drvdata->base_address)) {
-		retval = PTR_ERR(drvdata->base_address);
+	if (!drvdata->base_address) {
+		retval = -ENODEV;
 		goto failed;
 	}
 

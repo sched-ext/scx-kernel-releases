@@ -39,7 +39,7 @@ int max_ssid;
 
 #define MAX_CSS_IDX 0
 struct channel_subsystem *channel_subsystems[MAX_CSS_IDX + 1];
-static const struct bus_type css_bus_type;
+static struct bus_type css_bus_type;
 
 int
 for_each_subchannel(int(*fn)(struct subchannel_id, void *), void *data)
@@ -1114,33 +1114,26 @@ static int cio_dma_pool_init(void)
 	return 0;
 }
 
-void *__cio_gp_dma_zalloc(struct gen_pool *gp_dma, struct device *dma_dev,
-			  size_t size, dma32_t *dma_handle)
-{
-	dma_addr_t dma_addr;
-	size_t chunk_size;
-	void *addr;
-
-	if (!gp_dma)
-		return NULL;
-	addr = gen_pool_dma_alloc(gp_dma, size, &dma_addr);
-	while (!addr) {
-		chunk_size = round_up(size, PAGE_SIZE);
-		addr = dma_alloc_coherent(dma_dev, chunk_size, &dma_addr, CIO_DMA_GFP);
-		if (!addr)
-			return NULL;
-		gen_pool_add_virt(gp_dma, (unsigned long)addr, dma_addr, chunk_size, -1);
-		addr = gen_pool_dma_alloc(gp_dma, size, dma_handle ? &dma_addr : NULL);
-	}
-	if (dma_handle)
-		*dma_handle = (__force dma32_t)dma_addr;
-	return addr;
-}
-
 void *cio_gp_dma_zalloc(struct gen_pool *gp_dma, struct device *dma_dev,
 			size_t size)
 {
-	return __cio_gp_dma_zalloc(gp_dma, dma_dev, size, NULL);
+	dma_addr_t dma_addr;
+	unsigned long addr;
+	size_t chunk_size;
+
+	if (!gp_dma)
+		return NULL;
+	addr = gen_pool_alloc(gp_dma, size);
+	while (!addr) {
+		chunk_size = round_up(size, PAGE_SIZE);
+		addr = (unsigned long) dma_alloc_coherent(dma_dev,
+					 chunk_size, &dma_addr, CIO_DMA_GFP);
+		if (!addr)
+			return NULL;
+		gen_pool_add_virt(gp_dma, addr, dma_addr, chunk_size, -1);
+		addr = gen_pool_alloc(gp_dma, size);
+	}
+	return (void *) addr;
 }
 
 void cio_gp_dma_free(struct gen_pool *gp_dma, void *cpu_addr, size_t size)
@@ -1416,7 +1409,7 @@ static int css_uevent(const struct device *dev, struct kobj_uevent_env *env)
 	return ret;
 }
 
-static const struct bus_type css_bus_type = {
+static struct bus_type css_bus_type = {
 	.name     = "css",
 	.match    = css_bus_match,
 	.probe    = css_probe,

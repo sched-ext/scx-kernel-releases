@@ -79,23 +79,23 @@ struct xe_hw_engine_class_intf {
 	 * @defaults: default scheduling properties
 	 */
 	struct {
-		/** @sched_props.set_job_timeout: Set job timeout in ms for engine */
+		/** @set_job_timeout: Set job timeout in ms for engine */
 		u32 job_timeout_ms;
-		/** @sched_props.job_timeout_min: Min job timeout in ms for engine */
+		/** @job_timeout_min: Min job timeout in ms for engine */
 		u32 job_timeout_min;
-		/** @sched_props.job_timeout_max: Max job timeout in ms for engine */
+		/** @job_timeout_max: Max job timeout in ms for engine */
 		u32 job_timeout_max;
-		/** @sched_props.timeslice_us: timeslice period in micro-seconds */
+		/** @timeslice_us: timeslice period in micro-seconds */
 		u32 timeslice_us;
-		/** @sched_props.timeslice_min: min timeslice period in micro-seconds */
+		/** @timeslice_min: min timeslice period in micro-seconds */
 		u32 timeslice_min;
-		/** @sched_props.timeslice_max: max timeslice period in micro-seconds */
+		/** @timeslice_max: max timeslice period in micro-seconds */
 		u32 timeslice_max;
-		/** @sched_props.preempt_timeout_us: preemption timeout in micro-seconds */
+		/** @preempt_timeout_us: preemption timeout in micro-seconds */
 		u32 preempt_timeout_us;
-		/** @sched_props.preempt_timeout_min: min preemption timeout in micro-seconds */
+		/** @preempt_timeout_min: min preemption timeout in micro-seconds */
 		u32 preempt_timeout_min;
-		/** @sched_props.preempt_timeout_max: max preemption timeout in micro-seconds */
+		/** @preempt_timeout_max: max preemption timeout in micro-seconds */
 		u32 preempt_timeout_max;
 	} sched_props, defaults;
 };
@@ -116,8 +116,6 @@ struct xe_hw_engine {
 	u16 instance;
 	/** @logical_instance: logical instance of this hw engine */
 	u16 logical_instance;
-	/** @irq_offset: IRQ offset of this hw engine */
-	u16 irq_offset;
 	/** @mmio_base: MMIO base address of this hw engine*/
 	u32 mmio_base;
 	/**
@@ -164,52 +162,62 @@ struct xe_hw_engine_snapshot {
 	u16 logical_instance;
 	/** @forcewake: Force Wake information snapshot */
 	struct {
-		/** @forcewake.domain: force wake domain of this hw engine */
+		/** @domain: force wake domain of this hw engine */
 		enum xe_force_wake_domains domain;
-		/** @forcewake.ref: Forcewake ref for the above domain */
+		/** @ref: Forcewake ref for the above domain */
 		int ref;
 	} forcewake;
 	/** @mmio_base: MMIO base address of this hw engine*/
 	u32 mmio_base;
 	/** @reg: Useful MMIO register snapshot */
 	struct {
-		/** @reg.ring_execlist_status: RING_EXECLIST_STATUS */
-		u64 ring_execlist_status;
-		/** @reg.ring_execlist_sq_contents: RING_EXECLIST_SQ_CONTENTS */
-		u64 ring_execlist_sq_contents;
-		/** @reg.ring_acthd: RING_ACTHD */
-		u64 ring_acthd;
-		/** @reg.ring_bbaddr: RING_BBADDR */
-		u64 ring_bbaddr;
-		/** @reg.ring_dma_fadd: RING_DMA_FADD */
-		u64 ring_dma_fadd;
-		/** @reg.ring_hwstam: RING_HWSTAM */
+		/** @ring_hwstam: RING_HWSTAM */
 		u32 ring_hwstam;
-		/** @reg.ring_hws_pga: RING_HWS_PGA */
+		/** @ring_hws_pga: RING_HWS_PGA */
 		u32 ring_hws_pga;
-		/** @reg.ring_start: RING_START */
+		/** @ring_execlist_status_lo: RING_EXECLIST_STATUS_LO */
+		u32 ring_execlist_status_lo;
+		/** @ring_execlist_status_hi: RING_EXECLIST_STATUS_HI */
+		u32 ring_execlist_status_hi;
+		/** @ring_execlist_sq_contents_lo: RING_EXECLIST_SQ_CONTENTS */
+		u32 ring_execlist_sq_contents_lo;
+		/** @ring_execlist_sq_contents_hi: RING_EXECLIST_SQ_CONTENTS + 4 */
+		u32 ring_execlist_sq_contents_hi;
+		/** @ring_start: RING_START */
 		u32 ring_start;
-		/** @reg.ring_head: RING_HEAD */
+		/** @ring_head: RING_HEAD */
 		u32 ring_head;
-		/** @reg.ring_tail: RING_TAIL */
+		/** @ring_tail: RING_TAIL */
 		u32 ring_tail;
-		/** @reg.ring_ctl: RING_CTL */
+		/** @ring_ctl: RING_CTL */
 		u32 ring_ctl;
-		/** @reg.ring_mi_mode: RING_MI_MODE */
+		/** @ring_mi_mode: RING_MI_MODE */
 		u32 ring_mi_mode;
-		/** @reg.ring_mode: RING_MODE */
+		/** @ring_mode: RING_MODE */
 		u32 ring_mode;
-		/** @reg.ring_imr: RING_IMR */
+		/** @ring_imr: RING_IMR */
 		u32 ring_imr;
-		/** @reg.ring_esr: RING_ESR */
+		/** @ring_esr: RING_ESR */
 		u32 ring_esr;
-		/** @reg.ring_emr: RING_EMR */
+		/** @ring_emr: RING_EMR */
 		u32 ring_emr;
-		/** @reg.ring_eir: RING_EIR */
+		/** @ring_eir: RING_EIR */
 		u32 ring_eir;
-		/** @reg.ipehr: IPEHR */
+		/** @ring_acthd_udw: RING_ACTHD_UDW */
+		u32 ring_acthd_udw;
+		/** @ring_acthd: RING_ACTHD */
+		u32 ring_acthd;
+		/** @ring_bbaddr_udw: RING_BBADDR_UDW */
+		u32 ring_bbaddr_udw;
+		/** @ring_bbaddr: RING_BBADDR */
+		u32 ring_bbaddr;
+		/** @ring_dma_fadd_udw: RING_DMA_FADD_UDW */
+		u32 ring_dma_fadd_udw;
+		/** @ring_dma_fadd: RING_DMA_FADD */
+		u32 ring_dma_fadd;
+		/** @ipehr: IPEHR */
 		u32 ipehr;
-		/** @reg.rcu_mode: RCU_MODE */
+		/** @rcu_mode: RCU_MODE */
 		u32 rcu_mode;
 	} reg;
 };

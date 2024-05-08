@@ -45,8 +45,6 @@
  * find_pid_ns() using the int nr and struct pid_namespace *ns.
  */
 
-#define RESERVED_PIDS 300
-
 struct upid {
 	int nr;
 	struct pid_namespace *ns;
@@ -57,8 +55,6 @@ struct pid
 	refcount_t count;
 	unsigned int level;
 	spinlock_t lock;
-	struct dentry *stashed;
-	u64 ino;
 	/* lists of tasks that use this pid */
 	struct hlist_head tasks[PIDTYPE_MAX];
 	struct hlist_head inodes;
@@ -70,13 +66,15 @@ struct pid
 
 extern struct pid init_struct_pid;
 
+extern const struct file_operations pidfd_fops;
+
 struct file;
 
-struct pid *pidfd_pid(const struct file *file);
+extern struct pid *pidfd_pid(const struct file *file);
 struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags);
 struct task_struct *pidfd_get_task(int pidfd, unsigned int *flags);
+int pidfd_create(struct pid *pid, unsigned int flags);
 int pidfd_prepare(struct pid *pid, unsigned int flags, struct file **ret);
-void do_notify_pidfd(struct task_struct *task);
 
 static inline struct pid *get_pid(struct pid *pid)
 {

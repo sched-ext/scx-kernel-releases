@@ -189,6 +189,9 @@ static int fprobe_init_rethook(struct fprobe *fp, int num)
 {
 	int size;
 
+	if (num <= 0)
+		return -EINVAL;
+
 	if (!fp->exit_handler) {
 		fp->rethook = NULL;
 		return 0;
@@ -196,16 +199,15 @@ static int fprobe_init_rethook(struct fprobe *fp, int num)
 
 	/* Initialize rethook if needed */
 	if (fp->nr_maxactive)
-		num = fp->nr_maxactive;
+		size = fp->nr_maxactive;
 	else
-		num *= num_possible_cpus() * 2;
-	if (num <= 0)
+		size = num * num_possible_cpus() * 2;
+	if (size <= 0)
 		return -EINVAL;
 
-	size = sizeof(struct fprobe_rethook_node) + fp->entry_data_size;
-
 	/* Initialize rethook */
-	fp->rethook = rethook_alloc((void *)fp, fprobe_exit_handler, size, num);
+	fp->rethook = rethook_alloc((void *)fp, fprobe_exit_handler,
+				sizeof(struct fprobe_rethook_node), size);
 	if (IS_ERR(fp->rethook))
 		return PTR_ERR(fp->rethook);
 

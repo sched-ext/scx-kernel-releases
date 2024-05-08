@@ -652,7 +652,7 @@ static void jpeg_v4_0_3_dec_ring_set_wptr(struct amdgpu_ring *ring)
  *
  * Write a start command to the ring.
  */
-void jpeg_v4_0_3_dec_ring_insert_start(struct amdgpu_ring *ring)
+static void jpeg_v4_0_3_dec_ring_insert_start(struct amdgpu_ring *ring)
 {
 	if (!amdgpu_sriov_vf(ring->adev)) {
 		amdgpu_ring_write(ring, PACKETJ(regUVD_JRBC_EXTERNAL_REG_INTERNAL_OFFSET,
@@ -672,7 +672,7 @@ void jpeg_v4_0_3_dec_ring_insert_start(struct amdgpu_ring *ring)
  *
  * Write a end command to the ring.
  */
-void jpeg_v4_0_3_dec_ring_insert_end(struct amdgpu_ring *ring)
+static void jpeg_v4_0_3_dec_ring_insert_end(struct amdgpu_ring *ring)
 {
 	if (!amdgpu_sriov_vf(ring->adev)) {
 		amdgpu_ring_write(ring, PACKETJ(regUVD_JRBC_EXTERNAL_REG_INTERNAL_OFFSET,
@@ -695,7 +695,7 @@ void jpeg_v4_0_3_dec_ring_insert_end(struct amdgpu_ring *ring)
  *
  * Write a fence and a trap command to the ring.
  */
-void jpeg_v4_0_3_dec_ring_emit_fence(struct amdgpu_ring *ring, u64 addr, u64 seq,
+static void jpeg_v4_0_3_dec_ring_emit_fence(struct amdgpu_ring *ring, u64 addr, u64 seq,
 				unsigned int flags)
 {
 	WARN_ON(flags & AMDGPU_FENCE_FLAG_64BIT);
@@ -764,7 +764,7 @@ void jpeg_v4_0_3_dec_ring_emit_fence(struct amdgpu_ring *ring, u64 addr, u64 seq
  *
  * Write ring commands to execute the indirect buffer.
  */
-void jpeg_v4_0_3_dec_ring_emit_ib(struct amdgpu_ring *ring,
+static void jpeg_v4_0_3_dec_ring_emit_ib(struct amdgpu_ring *ring,
 				struct amdgpu_job *job,
 				struct amdgpu_ib *ib,
 				uint32_t flags)
@@ -815,7 +815,7 @@ void jpeg_v4_0_3_dec_ring_emit_ib(struct amdgpu_ring *ring,
 	amdgpu_ring_write(ring, 0x2);
 }
 
-void jpeg_v4_0_3_dec_ring_emit_reg_wait(struct amdgpu_ring *ring, uint32_t reg,
+static void jpeg_v4_0_3_dec_ring_emit_reg_wait(struct amdgpu_ring *ring, uint32_t reg,
 				uint32_t val, uint32_t mask)
 {
 	uint32_t reg_offset = (reg << 2);
@@ -842,7 +842,7 @@ void jpeg_v4_0_3_dec_ring_emit_reg_wait(struct amdgpu_ring *ring, uint32_t reg,
 	amdgpu_ring_write(ring, mask);
 }
 
-void jpeg_v4_0_3_dec_ring_emit_vm_flush(struct amdgpu_ring *ring,
+static void jpeg_v4_0_3_dec_ring_emit_vm_flush(struct amdgpu_ring *ring,
 				unsigned int vmid, uint64_t pd_addr)
 {
 	struct amdgpu_vmhub *hub = &ring->adev->vmhub[ring->vm_hub];
@@ -857,7 +857,7 @@ void jpeg_v4_0_3_dec_ring_emit_vm_flush(struct amdgpu_ring *ring,
 	jpeg_v4_0_3_dec_ring_emit_reg_wait(ring, data0, data1, mask);
 }
 
-void jpeg_v4_0_3_dec_ring_emit_wreg(struct amdgpu_ring *ring, uint32_t reg, uint32_t val)
+static void jpeg_v4_0_3_dec_ring_emit_wreg(struct amdgpu_ring *ring, uint32_t reg, uint32_t val)
 {
 	uint32_t reg_offset = (reg << 2);
 
@@ -875,7 +875,7 @@ void jpeg_v4_0_3_dec_ring_emit_wreg(struct amdgpu_ring *ring, uint32_t reg, uint
 	amdgpu_ring_write(ring, val);
 }
 
-void jpeg_v4_0_3_dec_ring_nop(struct amdgpu_ring *ring, uint32_t count)
+static void jpeg_v4_0_3_dec_ring_nop(struct amdgpu_ring *ring, uint32_t count)
 {
 	int i;
 

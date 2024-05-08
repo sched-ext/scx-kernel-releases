@@ -664,10 +664,11 @@ static void pci_rootport_aer_stats_incr(struct pci_dev *pdev,
 	}
 }
 
-static void __print_tlp_header(struct pci_dev *dev, struct pcie_tlp_log *t)
+static void __print_tlp_header(struct pci_dev *dev,
+			       struct aer_header_log_regs *t)
 {
 	pci_err(dev, "  TLP Header: %08x %08x %08x %08x\n",
-		t->dw[0], t->dw[1], t->dw[2], t->dw[3]);
+		t->dw0, t->dw1, t->dw2, t->dw3);
 }
 
 static void __aer_print_error(struct pci_dev *dev,
@@ -1209,7 +1210,7 @@ int aer_get_device_error_info(struct pci_dev *dev, struct aer_err_info *info)
 {
 	int type = pci_pcie_type(dev);
 	int aer = dev->aer_cap;
-	u32 aercc;
+	int temp;
 
 	/* Must reset in this function */
 	info->status = 0;
@@ -1240,12 +1241,19 @@ int aer_get_device_error_info(struct pci_dev *dev, struct aer_err_info *info)
 			return 0;
 
 		/* Get First Error Pointer */
-		pci_read_config_dword(dev, aer + PCI_ERR_CAP, &aercc);
-		info->first_error = PCI_ERR_CAP_FEP(aercc);
+		pci_read_config_dword(dev, aer + PCI_ERR_CAP, &temp);
+		info->first_error = PCI_ERR_CAP_FEP(temp);
 
 		if (info->status & AER_LOG_TLP_MASKS) {
 			info->tlp_header_valid = 1;
-			pcie_read_tlp_log(dev, aer + PCI_ERR_HEADER_LOG, &info->tlp);
+			pci_read_config_dword(dev,
+				aer + PCI_ERR_HEADER_LOG, &info->tlp.dw0);
+			pci_read_config_dword(dev,
+				aer + PCI_ERR_HEADER_LOG + 4, &info->tlp.dw1);
+			pci_read_config_dword(dev,
+				aer + PCI_ERR_HEADER_LOG + 8, &info->tlp.dw2);
+			pci_read_config_dword(dev,
+				aer + PCI_ERR_HEADER_LOG + 12, &info->tlp.dw3);
 		}
 	}
 

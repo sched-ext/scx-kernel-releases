@@ -285,8 +285,9 @@ static void bcm_uart_do_rx(struct uart_port *port)
 				flag = TTY_PARITY;
 		}
 
-		if (uart_prepare_sysrq_char(port, c))
+		if (uart_handle_sysrq_char(port, c))
 			continue;
+
 
 		if ((cstat & port->ignore_status_mask) == 0)
 			tty_insert_flip_char(tty_port, c, flag);
@@ -352,7 +353,7 @@ static irqreturn_t bcm_uart_interrupt(int irq, void *dev_id)
 					       estat & UART_EXTINP_DCD_MASK);
 	}
 
-	uart_unlock_and_check_sysrq(port);
+	uart_port_unlock(port);
 	return IRQ_HANDLED;
 }
 
@@ -702,14 +703,20 @@ static void bcm_console_write(struct console *co, const char *s,
 {
 	struct uart_port *port;
 	unsigned long flags;
-	int locked = 1;
+	int locked;
 
 	port = &ports[co->index];
 
-	if (oops_in_progress)
-		locked = uart_port_trylock_irqsave(port, &flags);
-	else
-		uart_port_lock_irqsave(port, &flags);
+	local_irq_save(flags);
+	if (port->sysrq) {
+		/* bcm_uart_interrupt() already took the lock */
+		locked = 0;
+	} else if (oops_in_progress) {
+		locked = uart_port_trylock(port);
+	} else {
+		uart_port_lock(port);
+		locked = 1;
+	}
 
 	/* call helper to deal with \r\n */
 	uart_console_write(port, s, count, bcm_console_putchar);
@@ -718,7 +725,8 @@ static void bcm_console_write(struct console *co, const char *s,
 	wait_for_xmitr(port);
 
 	if (locked)
-		uart_port_unlock_irqrestore(port, flags);
+		uart_port_unlock(port);
+	local_irq_restore(flags);
 }
 
 /*

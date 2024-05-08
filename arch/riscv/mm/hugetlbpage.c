@@ -125,26 +125,6 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 	return pte;
 }
 
-unsigned long hugetlb_mask_last_page(struct hstate *h)
-{
-	unsigned long hp_size = huge_page_size(h);
-
-	switch (hp_size) {
-#ifndef __PAGETABLE_PMD_FOLDED
-	case PUD_SIZE:
-		return P4D_SIZE - PUD_SIZE;
-#endif
-	case PMD_SIZE:
-		return PUD_SIZE - PMD_SIZE;
-	case napot_cont_size(NAPOT_CONT64KB_ORDER):
-		return PMD_SIZE - napot_cont_size(NAPOT_CONT64KB_ORDER);
-	default:
-		break;
-	}
-
-	return 0UL;
-}
-
 static pte_t get_clear_contig(struct mm_struct *mm,
 			      unsigned long addr,
 			      pte_t *ptep,
@@ -197,36 +177,13 @@ pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags)
 	return entry;
 }
 
-static void clear_flush(struct mm_struct *mm,
-			unsigned long addr,
-			pte_t *ptep,
-			unsigned long pgsize,
-			unsigned long ncontig)
-{
-	struct vm_area_struct vma = TLB_FLUSH_VMA(mm, 0);
-	unsigned long i, saddr = addr;
-
-	for (i = 0; i < ncontig; i++, addr += pgsize, ptep++)
-		ptep_get_and_clear(mm, addr, ptep);
-
-	flush_tlb_range(&vma, saddr, addr);
-}
-
-/*
- * When dealing with NAPOT mappings, the privileged specification indicates that
- * "if an update needs to be made, the OS generally should first mark all of the
- * PTEs invalid, then issue SFENCE.VMA instruction(s) covering all 4 KiB regions
- * within the range, [...] then update the PTE(s), as described in Section
- * 4.2.1.". That's the equivalent of the Break-Before-Make approach used by
- * arm64.
- */
 void set_huge_pte_at(struct mm_struct *mm,
 		     unsigned long addr,
 		     pte_t *ptep,
 		     pte_t pte,
 		     unsigned long sz)
 {
-	unsigned long hugepage_shift, pgsize;
+	unsigned long hugepage_shift;
 	int i, pte_num;
 
 	if (sz >= PGDIR_SIZE)
@@ -241,22 +198,7 @@ void set_huge_pte_at(struct mm_struct *mm,
 		hugepage_shift = PAGE_SHIFT;
 
 	pte_num = sz >> hugepage_shift;
-	pgsize = 1 << hugepage_shift;
-
-	if (!pte_present(pte)) {
-		for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
-			set_ptes(mm, addr, ptep, pte, 1);
-		return;
-	}
-
-	if (!pte_napot(pte)) {
-		set_ptes(mm, addr, ptep, pte, 1);
-		return;
-	}
-
-	clear_flush(mm, addr, ptep, pgsize, pte_num);
-
-	for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
+	for (i = 0; i < pte_num; i++, ptep++, addr += (1 << hugepage_shift))
 		set_pte_at(mm, addr, ptep, pte);
 }
 
@@ -364,7 +306,7 @@ void huge_pte_clear(struct mm_struct *mm,
 		pte_clear(mm, addr, ptep);
 }
 
-static bool is_napot_size(unsigned long size)
+static __init bool is_napot_size(unsigned long size)
 {
 	unsigned long order;
 
@@ -392,7 +334,7 @@ arch_initcall(napot_hugetlbpages_init);
 
 #else
 
-static bool is_napot_size(unsigned long size)
+static __init bool is_napot_size(unsigned long size)
 {
 	return false;
 }
@@ -409,7 +351,7 @@ int pmd_huge(pmd_t pmd)
 	return pmd_leaf(pmd);
 }
 
-static bool __hugetlb_valid_size(unsigned long size)
+bool __init arch_hugetlb_valid_size(unsigned long size)
 {
 	if (size == HPAGE_SIZE)
 		return true;
@@ -420,18 +362,6 @@ static bool __hugetlb_valid_size(unsigned long size)
 	else
 		return false;
 }
-
-bool __init arch_hugetlb_valid_size(unsigned long size)
-{
-	return __hugetlb_valid_size(size);
-}
-
-#ifdef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
-bool arch_hugetlb_migration_supported(struct hstate *h)
-{
-	return __hugetlb_valid_size(huge_page_size(h));
-}
-#endif
 
 #ifdef CONFIG_CONTIG_ALLOC
 static __init int gigantic_pages_init(void)

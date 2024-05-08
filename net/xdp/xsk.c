@@ -313,13 +313,10 @@ static bool xsk_is_bound(struct xdp_sock *xs)
 
 static int xsk_rcv_check(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
 {
-	struct net_device *dev = xdp->rxq->dev;
-	u32 qid = xdp->rxq->queue_index;
-
 	if (!xsk_is_bound(xs))
 		return -ENXIO;
 
-	if (!dev->_rx[qid].pool || xs->umem != dev->_rx[qid].pool->umem)
+	if (xs->dev != xdp->rxq->dev || xs->queue_id != xdp->rxq->queue_index)
 		return -EINVAL;
 
 	if (len > xsk_pool_get_rx_frame_size(xs->pool) && !xs->sg) {
@@ -725,8 +722,7 @@ static struct sk_buff *xsk_build_skb(struct xdp_sock *xs,
 			memcpy(vaddr, buffer, len);
 			kunmap_local(vaddr);
 
-			skb_add_rx_frag(skb, nr_frags, page, 0, len, PAGE_SIZE);
-			refcount_add(PAGE_SIZE, &xs->sk.sk_wmem_alloc);
+			skb_add_rx_frag(skb, nr_frags, page, 0, len, 0);
 		}
 
 		if (first_frag && desc->options & XDP_TX_METADATA) {
@@ -1417,8 +1413,6 @@ static int xsk_setsockopt(struct socket *sock, int level, int optname,
 		struct xsk_queue **q;
 		int entries;
 
-		if (optlen < sizeof(entries))
-			return -EINVAL;
 		if (copy_from_sockptr(&entries, optval, sizeof(entries)))
 			return -EFAULT;
 

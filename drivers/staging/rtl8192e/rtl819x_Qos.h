@@ -13,7 +13,7 @@ struct qos_tsinfo {
 };
 
 struct octet_string {
-	u8 *octet;
+	u8 *Octet;
 	u16 Length;
 };
 

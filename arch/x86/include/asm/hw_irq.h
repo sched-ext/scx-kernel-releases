@@ -16,6 +16,8 @@
 
 #include <asm/irq_vectors.h>
 
+#define IRQ_MATRIX_BITS		NR_VECTORS
+
 #ifndef __ASSEMBLY__
 
 #include <linux/percpu.h>

@@ -639,7 +639,6 @@ TRACE_EVENT(rpc_stats_latency,
 		__field(unsigned long, backlog)
 		__field(unsigned long, rtt)
 		__field(unsigned long, execute)
-		__field(u32, xprt_id)
 	),
 
 	TP_fast_assign(
@@ -652,16 +651,13 @@ TRACE_EVENT(rpc_stats_latency,
 		__entry->backlog = ktime_to_us(backlog);
 		__entry->rtt = ktime_to_us(rtt);
 		__entry->execute = ktime_to_us(execute);
-		__entry->xprt_id = task->tk_xprt->id;
 	),
 
 	TP_printk(SUNRPC_TRACE_TASK_SPECIFIER
-		  " xid=0x%08x %sv%d %s backlog=%lu rtt=%lu execute=%lu"
-		  " xprt_id=%d",
+		  " xid=0x%08x %sv%d %s backlog=%lu rtt=%lu execute=%lu",
 		__entry->task_id, __entry->client_id, __entry->xid,
 		__get_str(progname), __entry->version, __get_str(procname),
-		__entry->backlog, __entry->rtt, __entry->execute,
-		__entry->xprt_id)
+		__entry->backlog, __entry->rtt, __entry->execute)
 );
 
 TRACE_EVENT(rpc_xdr_overflow,
@@ -1331,18 +1327,18 @@ TRACE_EVENT(xs_stream_read_data,
 		__field(ssize_t, err)
 		__field(size_t, total)
 		__string(addr, xprt ? xprt->address_strings[RPC_DISPLAY_ADDR] :
-				EVENT_NULL_STR)
+				"(null)")
 		__string(port, xprt ? xprt->address_strings[RPC_DISPLAY_PORT] :
-				EVENT_NULL_STR)
+				"(null)")
 	),
 
 	TP_fast_assign(
 		__entry->err = err;
 		__entry->total = total;
 		__assign_str(addr, xprt ?
-			xprt->address_strings[RPC_DISPLAY_ADDR] : EVENT_NULL_STR);
+			xprt->address_strings[RPC_DISPLAY_ADDR] : "(null)");
 		__assign_str(port, xprt ?
-			xprt->address_strings[RPC_DISPLAY_PORT] : EVENT_NULL_STR);
+			xprt->address_strings[RPC_DISPLAY_PORT] : "(null)");
 	),
 
 	TP_printk("peer=[%s]:%s err=%zd total=%zu", __get_str(addr),
@@ -1787,7 +1783,7 @@ TRACE_EVENT(svc_process,
 		__string(service, name)
 		__string(procedure, svc_proc_name(rqst))
 		__string(addr, rqst->rq_xprt ?
-			 rqst->rq_xprt->xpt_remotebuf : EVENT_NULL_STR)
+			 rqst->rq_xprt->xpt_remotebuf : "(null)")
 	),
 
 	TP_fast_assign(
@@ -1797,7 +1793,7 @@ TRACE_EVENT(svc_process,
 		__assign_str(service, name);
 		__assign_str(procedure, svc_proc_name(rqst));
 		__assign_str(addr, rqst->rq_xprt ?
-			     rqst->rq_xprt->xpt_remotebuf : EVENT_NULL_STR);
+			     rqst->rq_xprt->xpt_remotebuf : "(null)");
 	),
 
 	TP_printk("addr=%s xid=0x%08x service=%s vers=%u proc=%s",

@@ -13,7 +13,6 @@ Performance monitor support
    imx-ddr
    qcom_l2_pmu
    qcom_l3_pmu
-   starfive_starlink_pmu
    arm-ccn
    arm-cmn
    xgene-pmu

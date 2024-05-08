@@ -2014,40 +2014,26 @@ static int rtl8192fu_led_brightness_set(struct led_classdev *led_cdev,
 	struct rtl8xxxu_priv *priv = container_of(led_cdev,
 						  struct rtl8xxxu_priv,
 						  led_cdev);
-	u32 ledcfg;
+	u16 ledcfg;
 
 	/* Values obtained by observing the USB traffic from the Windows driver. */
 	rtl8xxxu_write32(priv, REG_SW_GPIO_SHARE_CTRL_0, 0x20080);
 	rtl8xxxu_write32(priv, REG_SW_GPIO_SHARE_CTRL_1, 0x1b0000);
 
-	ledcfg = rtl8xxxu_read32(priv, REG_LEDCFG0);
-
-	/* Comfast CF-826F uses LED1. Asus USB-N13 C1 uses LED0. Set both. */
-
-	u32p_replace_bits(&ledcfg, LED_GPIO_ENABLE, LEDCFG0_LED2EN);
-	u32p_replace_bits(&ledcfg, LED_IO_MODE_OUTPUT, LEDCFG0_LED0_IO_MODE);
-	u32p_replace_bits(&ledcfg, LED_IO_MODE_OUTPUT, LEDCFG0_LED1_IO_MODE);
+	ledcfg = rtl8xxxu_read16(priv, REG_LEDCFG0);
 
 	if (brightness == LED_OFF) {
-		u32p_replace_bits(&ledcfg, LED_MODE_SW_CTRL, LEDCFG0_LED0CM);
-		u32p_replace_bits(&ledcfg, LED_SW_OFF, LEDCFG0_LED0SV);
-		u32p_replace_bits(&ledcfg, LED_MODE_SW_CTRL, LEDCFG0_LED1CM);
-		u32p_replace_bits(&ledcfg, LED_SW_OFF, LEDCFG0_LED1SV);
+		/* Value obtained like above. */
+		ledcfg = BIT(1) | BIT(7);
 	} else if (brightness == LED_ON) {
-		u32p_replace_bits(&ledcfg, LED_MODE_SW_CTRL, LEDCFG0_LED0CM);
-		u32p_replace_bits(&ledcfg, LED_SW_ON, LEDCFG0_LED0SV);
-		u32p_replace_bits(&ledcfg, LED_MODE_SW_CTRL, LEDCFG0_LED1CM);
-		u32p_replace_bits(&ledcfg, LED_SW_ON, LEDCFG0_LED1SV);
+		/* Value obtained like above. */
+		ledcfg = BIT(1) | BIT(7) | BIT(11);
 	} else if (brightness == RTL8XXXU_HW_LED_CONTROL) {
-		u32p_replace_bits(&ledcfg, LED_MODE_TX_OR_RX_EVENTS,
-				  LEDCFG0_LED0CM);
-		u32p_replace_bits(&ledcfg, LED_SW_OFF, LEDCFG0_LED0SV);
-		u32p_replace_bits(&ledcfg, LED_MODE_TX_OR_RX_EVENTS,
-				  LEDCFG0_LED1CM);
-		u32p_replace_bits(&ledcfg, LED_SW_OFF, LEDCFG0_LED1SV);
+		/* Value obtained by brute force. */
+		ledcfg = BIT(8) | BIT(9);
 	}
 
-	rtl8xxxu_write32(priv, REG_LEDCFG0, ledcfg);
+	rtl8xxxu_write16(priv, REG_LEDCFG0, ledcfg);
 
 	return 0;
 }
@@ -2095,7 +2081,6 @@ struct rtl8xxxu_fileops rtl8192fu_fops = {
 	.max_aggr_num = 0x1f1f,
 	.supports_ap = 1,
 	.max_macid_num = 128,
-	.max_sec_cam_num = 64,
 	.trxff_boundary = 0x3f3f,
 	.pbp_rx = PBP_PAGE_SIZE_256,
 	.pbp_tx = PBP_PAGE_SIZE_256,

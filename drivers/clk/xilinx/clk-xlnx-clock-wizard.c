@@ -498,7 +498,7 @@ static int clk_wzrd_dynamic_all_nolock(struct clk_hw *hw, unsigned long rate,
 {
 	struct clk_wzrd_divider *divider = to_clk_wzrd_divider(hw);
 	unsigned long vco_freq, rate_div, clockout0_div;
-	void __iomem *div_addr;
+	void __iomem *div_addr = divider->base;
 	u32 reg, pre, f;
 	int err;
 

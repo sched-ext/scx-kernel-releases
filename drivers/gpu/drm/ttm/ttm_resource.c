@@ -30,8 +30,6 @@
 #include <drm/ttm/ttm_placement.h>
 #include <drm/ttm/ttm_resource.h>
 
-#include <drm/drm_util.h>
-
 /**
  * ttm_lru_bulk_move_init - initialize a bulk move structure
  * @bulk: the structure to init
@@ -242,7 +240,6 @@ int ttm_resource_alloc(struct ttm_buffer_object *bo,
 	spin_unlock(&bo->bdev->lru_lock);
 	return 0;
 }
-EXPORT_SYMBOL_FOR_TESTS_ONLY(ttm_resource_alloc);
 
 void ttm_resource_free(struct ttm_buffer_object *bo, struct ttm_resource **res)
 {
@@ -291,15 +288,37 @@ bool ttm_resource_intersects(struct ttm_device *bdev,
 }
 
 /**
- * ttm_resource_compatible - check if resource is compatible with placement
+ * ttm_resource_compatible - test for compatibility
  *
- * @res: the resource to check
- * @placement: the placement to check against
+ * @bdev: TTM device structure
+ * @res: The resource to test
+ * @place: The placement to test
+ * @size: How many bytes the new allocation needs.
  *
- * Returns true if the placement is compatible.
+ * Test if @res compatible with @place and @size.
+ *
+ * Returns true if the res placement compatible with @place and @size.
  */
-bool ttm_resource_compatible(struct ttm_resource *res,
-			     struct ttm_placement *placement)
+bool ttm_resource_compatible(struct ttm_device *bdev,
+			     struct ttm_resource *res,
+			     const struct ttm_place *place,
+			     size_t size)
+{
+	struct ttm_resource_manager *man;
+
+	if (!res || !place)
+		return false;
+
+	man = ttm_manager_type(bdev, res->mem_type);
+	if (!man->func->compatible)
+		return true;
+
+	return man->func->compatible(man, res, place, size);
+}
+
+static bool ttm_resource_places_compat(struct ttm_resource *res,
+				       const struct ttm_place *places,
+				       unsigned num_placement)
 {
 	struct ttm_buffer_object *bo = res->bo;
 	struct ttm_device *bdev = bo->bdev;
@@ -308,22 +327,41 @@ bool ttm_resource_compatible(struct ttm_resource *res,
 	if (res->placement & TTM_PL_FLAG_TEMPORARY)
 		return false;
 
-	for (i = 0; i < placement->num_placement; i++) {
-		const struct ttm_place *place = &placement->placement[i];
-		struct ttm_resource_manager *man;
+	for (i = 0; i < num_placement; i++) {
+		const struct ttm_place *heap = &places[i];
 
-		if (res->mem_type != place->mem_type)
+		if (!ttm_resource_compatible(bdev, res, heap, bo->base.size))
 			continue;
 
-		man = ttm_manager_type(bdev, res->mem_type);
-		if (man->func->compatible &&
-		    !man->func->compatible(man, res, place, bo->base.size))
-			continue;
-
-		if ((!(place->flags & TTM_PL_FLAG_CONTIGUOUS) ||
+		if ((res->mem_type == heap->mem_type) &&
+		    (!(heap->flags & TTM_PL_FLAG_CONTIGUOUS) ||
 		     (res->placement & TTM_PL_FLAG_CONTIGUOUS)))
 			return true;
 	}
+	return false;
+}
+
+/**
+ * ttm_resource_compat - check if resource is compatible with placement
+ *
+ * @res: the resource to check
+ * @placement: the placement to check against
+ *
+ * Returns true if the placement is compatible.
+ */
+bool ttm_resource_compat(struct ttm_resource *res,
+			 struct ttm_placement *placement)
+{
+	if (ttm_resource_places_compat(res, placement->placement,
+				       placement->num_placement))
+		return true;
+
+	if ((placement->busy_placement != placement->placement ||
+	     placement->num_busy_placement > placement->num_placement) &&
+	    ttm_resource_places_compat(res, placement->busy_placement,
+				       placement->num_busy_placement))
+		return true;
+
 	return false;
 }
 

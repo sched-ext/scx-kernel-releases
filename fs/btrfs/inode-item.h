@@ -6,15 +6,14 @@
 #include <linux/types.h>
 #include <linux/crc32c.h>
 
-struct fscrypt_str;
-struct extent_buffer;
 struct btrfs_trans_handle;
 struct btrfs_root;
 struct btrfs_path;
 struct btrfs_key;
 struct btrfs_inode_extref;
 struct btrfs_inode;
-struct btrfs_truncate_control;
+struct extent_buffer;
+struct fscrypt_str;
 
 /*
  * Return this if we need to call truncate_block for the last bit of the

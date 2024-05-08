@@ -211,5 +211,4 @@ static struct platform_driver avs_max98373_driver = {
 
 module_platform_driver(avs_max98373_driver)
 
-MODULE_DESCRIPTION("Intel max98373 machine driver");
 MODULE_LICENSE("GPL");

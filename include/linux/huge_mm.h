@@ -265,11 +265,10 @@ unsigned long thp_get_unmapped_area(struct file *filp, unsigned long addr,
 
 void folio_prep_large_rmappable(struct folio *folio);
 bool can_split_folio(struct folio *folio, int *pextra_pins);
-int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
-		unsigned int new_order);
+int split_huge_page_to_list(struct page *page, struct list_head *list);
 static inline int split_huge_page(struct page *page)
 {
-	return split_huge_page_to_list_to_order(page, NULL, 0);
+	return split_huge_page_to_list(page, NULL);
 }
 void deferred_split_folio(struct folio *folio);
 
@@ -423,8 +422,7 @@ can_split_folio(struct folio *folio, int *pextra_pins)
 	return false;
 }
 static inline int
-split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
-		unsigned int new_order)
+split_huge_page_to_list(struct page *page, struct list_head *list)
 {
 	return 0;
 }
@@ -521,19 +519,16 @@ static inline bool thp_migration_supported(void)
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
-static inline int split_folio_to_list_to_order(struct folio *folio,
-		struct list_head *list, int new_order)
+static inline int split_folio_to_list(struct folio *folio,
+		struct list_head *list)
 {
-	return split_huge_page_to_list_to_order(&folio->page, list, new_order);
+	return split_huge_page_to_list(&folio->page, list);
 }
 
-static inline int split_folio_to_order(struct folio *folio, int new_order)
+static inline int split_folio(struct folio *folio)
 {
-	return split_folio_to_list_to_order(folio, NULL, new_order);
+	return split_folio_to_list(folio, NULL);
 }
-
-#define split_folio_to_list(f, l) split_folio_to_list_to_order(f, l, 0)
-#define split_folio(f) split_folio_to_order(f, 0)
 
 /*
  * archs that select ARCH_WANTS_THP_SWAP but don't support THP_SWP due to

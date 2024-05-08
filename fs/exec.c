@@ -895,7 +895,6 @@ int transfer_args_to_stack(struct linux_binprm *bprm,
 			goto out;
 	}
 
-	bprm->exec += *sp_location - MAX_ARG_PAGES * PAGE_SIZE;
 	*sp_location = sp;
 
 out:
@@ -1159,6 +1158,7 @@ static int de_thread(struct task_struct *tsk)
 
 		BUG_ON(leader->exit_state != EXIT_ZOMBIE);
 		leader->exit_state = EXIT_DEAD;
+
 		/*
 		 * We are going to release_task()->ptrace_unlink() silently,
 		 * the tracer can sleep in do_wait(). EXIT_DEAD guarantees
@@ -1720,6 +1720,7 @@ static int prepare_binprm(struct linux_binprm *bprm)
  */
 int remove_arg_zero(struct linux_binprm *bprm)
 {
+	int ret = 0;
 	unsigned long offset;
 	char *kaddr;
 	struct page *page;
@@ -1730,8 +1731,10 @@ int remove_arg_zero(struct linux_binprm *bprm)
 	do {
 		offset = bprm->p & ~PAGE_MASK;
 		page = get_arg_page(bprm, bprm->p, 0);
-		if (!page)
-			return -EFAULT;
+		if (!page) {
+			ret = -EFAULT;
+			goto out;
+		}
 		kaddr = kmap_local_page(page);
 
 		for (; offset < PAGE_SIZE && kaddr[offset];
@@ -1744,8 +1747,10 @@ int remove_arg_zero(struct linux_binprm *bprm)
 
 	bprm->p++;
 	bprm->argc--;
+	ret = 0;
 
-	return 0;
+out:
+	return ret;
 }
 EXPORT_SYMBOL(remove_arg_zero);
 

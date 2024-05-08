@@ -11,7 +11,6 @@ struct nvkm_client {
 	u32 debug;
 
 	struct rb_root objroot;
-	spinlock_t obj_lock;
 
 	void *data;
 	int (*event)(u64 token, void *argv, u32 argc);

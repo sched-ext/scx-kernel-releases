@@ -124,14 +124,11 @@ struct xe_uc_fw {
 
 	/** @versions: FW versions wanted and found */
 	struct {
-		/** @versions.wanted: firmware version wanted by platform */
+		/** @wanted: firmware version wanted by platform */
 		struct xe_uc_fw_version wanted;
-		/**
-		 * @versions.wanted_type: type of firmware version wanted
-		 * (release vs compatibility)
-		 */
+		/** @wanted_type: type of firmware version wanted (release vs compatibility) */
 		enum xe_uc_fw_version_types wanted_type;
-		/** @versions.found: fw versions found in firmware blob */
+		/** @found: fw versions found in firmware blob */
 		struct xe_uc_fw_version found[XE_UC_FW_VER_TYPE_COUNT];
 	} versions;
 

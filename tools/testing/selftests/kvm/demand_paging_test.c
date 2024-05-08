@@ -45,10 +45,10 @@ static void vcpu_worker(struct memstress_vcpu_args *vcpu_args)
 
 	/* Let the guest access its memory */
 	ret = _vcpu_run(vcpu);
-	TEST_ASSERT(ret == 0, "vcpu_run failed: %d", ret);
+	TEST_ASSERT(ret == 0, "vcpu_run failed: %d\n", ret);
 	if (get_ucall(vcpu, NULL) != UCALL_SYNC) {
 		TEST_ASSERT(false,
-			    "Invalid guest sync status: exit_reason=%s",
+			    "Invalid guest sync status: exit_reason=%s\n",
 			    exit_reason_str(run->exit_reason));
 	}
 

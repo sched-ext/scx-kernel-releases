@@ -46,6 +46,9 @@ static int tur_done(struct scsi_device *sdev, struct hp_sw_dh_data *h,
 	int ret = SCSI_DH_IO;
 
 	switch (sshdr->sense_key) {
+	case UNIT_ATTENTION:
+		ret = SCSI_DH_IMM_RETRY;
+		break;
 	case NOT_READY:
 		if (sshdr->asc == 0x04 && sshdr->ascq == 2) {
 			/*
@@ -82,24 +85,11 @@ static int hp_sw_tur(struct scsi_device *sdev, struct hp_sw_dh_data *h)
 	int ret, res;
 	blk_opf_t opf = REQ_OP_DRV_IN | REQ_FAILFAST_DEV |
 				REQ_FAILFAST_TRANSPORT | REQ_FAILFAST_DRIVER;
-	struct scsi_failure failure_defs[] = {
-		{
-			.sense = UNIT_ATTENTION,
-			.asc = SCMD_FAILURE_ASC_ANY,
-			.ascq = SCMD_FAILURE_ASCQ_ANY,
-			.allowed = SCMD_FAILURE_NO_LIMIT,
-			.result = SAM_STAT_CHECK_CONDITION,
-		},
-		{}
-	};
-	struct scsi_failures failures = {
-		.failure_definitions = failure_defs,
-	};
 	const struct scsi_exec_args exec_args = {
 		.sshdr = &sshdr,
-		.failures = &failures,
 	};
 
+retry:
 	res = scsi_execute_cmd(sdev, cmd, opf, NULL, 0, HP_SW_TIMEOUT,
 			       HP_SW_RETRIES, &exec_args);
 	if (res > 0 && scsi_sense_valid(&sshdr)) {
@@ -113,6 +103,9 @@ static int hp_sw_tur(struct scsi_device *sdev, struct hp_sw_dh_data *h)
 			    HP_SW_NAME, res);
 		ret = SCSI_DH_IO;
 	}
+
+	if (ret == SCSI_DH_IMM_RETRY)
+		goto retry;
 
 	return ret;
 }
@@ -129,31 +122,14 @@ static int hp_sw_start_stop(struct hp_sw_dh_data *h)
 	struct scsi_sense_hdr sshdr;
 	struct scsi_device *sdev = h->sdev;
 	int res, rc;
+	int retry_cnt = HP_SW_RETRIES;
 	blk_opf_t opf = REQ_OP_DRV_IN | REQ_FAILFAST_DEV |
 				REQ_FAILFAST_TRANSPORT | REQ_FAILFAST_DRIVER;
-	struct scsi_failure failure_defs[] = {
-		{
-			/*
-			 * LUN not ready - manual intervention required
-			 *
-			 * Switch-over in progress, retry.
-			 */
-			.sense = NOT_READY,
-			.asc = 0x04,
-			.ascq = 0x03,
-			.allowed = HP_SW_RETRIES,
-			.result = SAM_STAT_CHECK_CONDITION,
-		},
-		{}
-	};
-	struct scsi_failures failures = {
-		.failure_definitions = failure_defs,
-	};
 	const struct scsi_exec_args exec_args = {
 		.sshdr = &sshdr,
-		.failures = &failures,
 	};
 
+retry:
 	res = scsi_execute_cmd(sdev, cmd, opf, NULL, 0, HP_SW_TIMEOUT,
 			       HP_SW_RETRIES, &exec_args);
 	if (!res) {
@@ -168,6 +144,13 @@ static int hp_sw_start_stop(struct hp_sw_dh_data *h)
 	switch (sshdr.sense_key) {
 	case NOT_READY:
 		if (sshdr.asc == 0x04 && sshdr.ascq == 3) {
+			/*
+			 * LUN not ready - manual intervention required
+			 *
+			 * Switch-over in progress, retry.
+			 */
+			if (--retry_cnt)
+				goto retry;
 			rc = SCSI_DH_RETRY;
 			break;
 		}

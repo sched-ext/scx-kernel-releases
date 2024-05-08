@@ -16,9 +16,9 @@ struct xe_wopcm {
 	u32 size;
 	/** @guc: GuC WOPCM Region info */
 	struct {
-		/** @guc.base: GuC WOPCM base which is offset from WOPCM base */
+		/** @base: GuC WOPCM base which is offset from WOPCM base */
 		u32 base;
-		/** @guc.size: Size of the GuC WOPCM region */
+		/** @size: Size of the GuC WOPCM region */
 		u32 size;
 	} guc;
 };

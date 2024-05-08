@@ -69,9 +69,7 @@ struct mdp5_smp;
 struct mdp5_smp *mdp5_smp_init(struct mdp5_kms *mdp5_kms,
 		const struct mdp5_smp_block *cfg);
 
-struct mdp5_global_state;
-void mdp5_smp_dump(struct mdp5_smp *smp, struct drm_printer *p,
-		   struct mdp5_global_state *global_state);
+void mdp5_smp_dump(struct mdp5_smp *smp, struct drm_printer *p);
 
 uint32_t mdp5_smp_calculate(struct mdp5_smp *smp,
 		const struct mdp_format *format,

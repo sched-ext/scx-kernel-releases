@@ -51,10 +51,13 @@ enum bch_folio_sector_state {
 
 struct bch_folio_sector {
 	/* Uncompressed, fully allocated replicas (or on disk reservation): */
-	u8			nr_replicas:4,
+	unsigned		nr_replicas:4;
+
 	/* Owns PAGE_SECTORS * replicas_reserved sized in memory reservation: */
-				replicas_reserved:4;
-	u8			state;
+	unsigned		replicas_reserved:4;
+
+	/* i_sectors: */
+	enum bch_folio_sector_state state:8;
 };
 
 struct bch_folio {

@@ -622,13 +622,8 @@ static int arkfb_set_par(struct fb_info *info)
 		info->tileops = NULL;
 
 		/* in 4bpp supports 8p wide tiles only, any tiles otherwise */
-		if (bpp == 4) {
-			bitmap_zero(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
-			set_bit(8 - 1, info->pixmap.blit_x);
-		} else {
-			bitmap_fill(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
-		}
-		bitmap_fill(info->pixmap.blit_y, FB_MAX_BLIT_HEIGHT);
+		info->pixmap.blit_x = (bpp == 4) ? (1 << (8 - 1)) : (~(u32)0);
+		info->pixmap.blit_y = ~(u32)0;
 
 		offset_value = (info->var.xres_virtual * bpp) / 64;
 		screen_size = info->var.yres_virtual * info->fix.line_length;
@@ -640,10 +635,8 @@ static int arkfb_set_par(struct fb_info *info)
 		info->tileops = &arkfb_tile_ops;
 
 		/* supports 8x16 tiles only */
-		bitmap_zero(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
-		set_bit(8 - 1, info->pixmap.blit_x);
-		bitmap_zero(info->pixmap.blit_y, FB_MAX_BLIT_HEIGHT);
-		set_bit(16 - 1, info->pixmap.blit_y);
+		info->pixmap.blit_x = 1 << (8 - 1);
+		info->pixmap.blit_y = 1 << (16 - 1);
 
 		offset_value = info->var.xres_virtual / 16;
 		screen_size = (info->var.xres_virtual * info->var.yres_virtual) / 64;

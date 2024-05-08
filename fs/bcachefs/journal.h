@@ -264,8 +264,7 @@ static inline union journal_res_state journal_state_buf_put(struct journal *j, u
 }
 
 bool bch2_journal_entry_close(struct journal *);
-void bch2_journal_do_writes(struct journal *);
-void bch2_journal_buf_put_final(struct journal *, u64);
+void bch2_journal_buf_put_final(struct journal *, u64, bool);
 
 static inline void __bch2_journal_buf_put(struct journal *j, unsigned idx, u64 seq)
 {
@@ -273,7 +272,7 @@ static inline void __bch2_journal_buf_put(struct journal *j, unsigned idx, u64 s
 
 	s = journal_state_buf_put(j, idx);
 	if (!journal_state_count(s, idx))
-		bch2_journal_buf_put_final(j, seq);
+		bch2_journal_buf_put_final(j, seq, idx == s.unwritten_idx);
 }
 
 static inline void bch2_journal_buf_put(struct journal *j, unsigned idx, u64 seq)
@@ -283,7 +282,7 @@ static inline void bch2_journal_buf_put(struct journal *j, unsigned idx, u64 seq
 	s = journal_state_buf_put(j, idx);
 	if (!journal_state_count(s, idx)) {
 		spin_lock(&j->lock);
-		bch2_journal_buf_put_final(j, seq);
+		bch2_journal_buf_put_final(j, seq, idx == s.unwritten_idx);
 		spin_unlock(&j->lock);
 	}
 }

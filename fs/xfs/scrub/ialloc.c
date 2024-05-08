@@ -76,7 +76,7 @@ xchk_inobt_xref_finobt(
 	int			has_record;
 	int			error;
 
-	ASSERT(xfs_btree_is_fino(cur->bc_ops));
+	ASSERT(cur->bc_btnum == XFS_BTNUM_FINO);
 
 	error = xfs_inobt_lookup(cur, agino, XFS_LOOKUP_LE, &has_record);
 	if (error)
@@ -179,7 +179,7 @@ xchk_finobt_xref_inobt(
 	int			has_record;
 	int			error;
 
-	ASSERT(xfs_btree_is_ino(cur->bc_ops));
+	ASSERT(cur->bc_btnum == XFS_BTNUM_INO);
 
 	error = xfs_inobt_lookup(cur, agino, XFS_LOOKUP_LE, &has_record);
 	if (error)
@@ -514,7 +514,7 @@ xchk_iallocbt_rec_alignment(
 	 * Otherwise, we expect that the finobt record is aligned to the
 	 * cluster alignment as told by the superblock.
 	 */
-	if (xfs_btree_is_fino(bs->cur->bc_ops)) {
+	if (bs->cur->bc_btnum == XFS_BTNUM_FINO) {
 		unsigned int	imask;
 
 		imask = min_t(unsigned int, XFS_INODES_PER_CHUNK,
@@ -649,7 +649,8 @@ out:
  */
 STATIC void
 xchk_iallocbt_xref_rmap_btreeblks(
-	struct xfs_scrub	*sc)
+	struct xfs_scrub	*sc,
+	int			which)
 {
 	xfs_filblks_t		blocks;
 	xfs_extlen_t		inobt_blocks = 0;
@@ -687,6 +688,7 @@ xchk_iallocbt_xref_rmap_btreeblks(
 STATIC void
 xchk_iallocbt_xref_rmap_inodes(
 	struct xfs_scrub	*sc,
+	int			which,
 	unsigned long long	inodes)
 {
 	xfs_filblks_t		blocks;
@@ -717,14 +719,17 @@ xchk_iallocbt(
 		.next_startino	= NULLAGINO,
 		.next_cluster_ino = NULLAGINO,
 	};
+	xfs_btnum_t		which;
 	int			error;
 
 	switch (sc->sm->sm_type) {
 	case XFS_SCRUB_TYPE_INOBT:
 		cur = sc->sa.ino_cur;
+		which = XFS_BTNUM_INO;
 		break;
 	case XFS_SCRUB_TYPE_FINOBT:
 		cur = sc->sa.fino_cur;
+		which = XFS_BTNUM_FINO;
 		break;
 	default:
 		ASSERT(0);
@@ -736,7 +741,7 @@ xchk_iallocbt(
 	if (error)
 		return error;
 
-	xchk_iallocbt_xref_rmap_btreeblks(sc);
+	xchk_iallocbt_xref_rmap_btreeblks(sc, which);
 
 	/*
 	 * If we're scrubbing the inode btree, inode_blocks is the number of
@@ -745,8 +750,9 @@ xchk_iallocbt(
 	 * knows about.  We can't do this for the finobt since it only points
 	 * to inode chunks with free inodes.
 	 */
-	if (sc->sm->sm_type == XFS_SCRUB_TYPE_INOBT)
-		xchk_iallocbt_xref_rmap_inodes(sc, iabt.inodes);
+	if (which == XFS_BTNUM_INO)
+		xchk_iallocbt_xref_rmap_inodes(sc, which, iabt.inodes);
+
 	return error;
 }
 

@@ -855,14 +855,9 @@ int iwl_mvm_mld_rm_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 
 int iwl_mvm_mld_rm_sta_id(struct iwl_mvm *mvm, u8 sta_id)
 {
-	int ret;
+	int ret = iwl_mvm_mld_rm_sta_from_fw(mvm, sta_id);
 
 	lockdep_assert_held(&mvm->mutex);
-
-	if (WARN_ON(sta_id == IWL_MVM_INVALID_STA))
-		return 0;
-
-	ret = iwl_mvm_mld_rm_sta_from_fw(mvm, sta_id);
 
 	RCU_INIT_POINTER(mvm->fw_id_to_mac_id[sta_id], NULL);
 	RCU_INIT_POINTER(mvm->fw_id_to_link_sta[sta_id], NULL);

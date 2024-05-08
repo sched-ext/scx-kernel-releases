@@ -19,26 +19,20 @@
 #include <asm/patch.h>
 #include <asm/vendorid_list.h>
 
-#define CSR_TH_SXSTATUS		0x5c0
-#define SXSTATUS_MAEE		_AC(0x200000, UL)
-
-static bool errata_probe_mae(unsigned int stage,
-			     unsigned long arch_id, unsigned long impid)
+static bool errata_probe_pbmt(unsigned int stage,
+			      unsigned long arch_id, unsigned long impid)
 {
-	if (!IS_ENABLED(CONFIG_ERRATA_THEAD_MAE))
+	if (!IS_ENABLED(CONFIG_ERRATA_THEAD_PBMT))
 		return false;
 
 	if (arch_id != 0 || impid != 0)
 		return false;
 
-	if (stage != RISCV_ALTERNATIVES_EARLY_BOOT &&
-	    stage != RISCV_ALTERNATIVES_MODULE)
-		return false;
+	if (stage == RISCV_ALTERNATIVES_EARLY_BOOT ||
+	    stage == RISCV_ALTERNATIVES_MODULE)
+		return true;
 
-	if (!(csr_read(CSR_TH_SXSTATUS) & SXSTATUS_MAEE))
-		return false;
-
-	return true;
+	return false;
 }
 
 /*
@@ -146,8 +140,8 @@ static u32 thead_errata_probe(unsigned int stage,
 {
 	u32 cpu_req_errata = 0;
 
-	if (errata_probe_mae(stage, archid, impid))
-		cpu_req_errata |= BIT(ERRATA_THEAD_MAE);
+	if (errata_probe_pbmt(stage, archid, impid))
+		cpu_req_errata |= BIT(ERRATA_THEAD_PBMT);
 
 	errata_probe_cmo(stage, archid, impid);
 

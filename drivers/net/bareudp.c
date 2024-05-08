@@ -194,10 +194,15 @@ static int bareudp_init(struct net_device *dev)
 	struct bareudp_dev *bareudp = netdev_priv(dev);
 	int err;
 
-	err = gro_cells_init(&bareudp->gro_cells, dev);
-	if (err)
-		return err;
+	dev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
+	if (!dev->tstats)
+		return -ENOMEM;
 
+	err = gro_cells_init(&bareudp->gro_cells, dev);
+	if (err) {
+		free_percpu(dev->tstats);
+		return err;
+	}
 	return 0;
 }
 
@@ -206,6 +211,7 @@ static void bareudp_uninit(struct net_device *dev)
 	struct bareudp_dev *bareudp = netdev_priv(dev);
 
 	gro_cells_destroy(&bareudp->gro_cells);
+	free_percpu(dev->tstats);
 }
 
 static struct socket *bareudp_create_sock(struct net *net, __be16 port)
@@ -523,6 +529,7 @@ static const struct net_device_ops bareudp_netdev_ops = {
 	.ndo_open               = bareudp_open,
 	.ndo_stop               = bareudp_stop,
 	.ndo_start_xmit         = bareudp_xmit,
+	.ndo_get_stats64        = dev_get_tstats64,
 	.ndo_fill_metadata_dst  = bareudp_fill_metadata_dst,
 };
 
@@ -560,7 +567,6 @@ static void bareudp_setup(struct net_device *dev)
 	netif_keep_dst(dev);
 	dev->priv_flags |= IFF_NO_QUEUE;
 	dev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
-	dev->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
 }
 
 static int bareudp_validate(struct nlattr *tb[], struct nlattr *data[],
@@ -754,18 +760,23 @@ static void bareudp_destroy_tunnels(struct net *net, struct list_head *head)
 		unregister_netdevice_queue(bareudp->dev, head);
 }
 
-static void __net_exit bareudp_exit_batch_rtnl(struct list_head *net_list,
-					       struct list_head *dev_kill_list)
+static void __net_exit bareudp_exit_batch_net(struct list_head *net_list)
 {
 	struct net *net;
+	LIST_HEAD(list);
 
+	rtnl_lock();
 	list_for_each_entry(net, net_list, exit_list)
-		bareudp_destroy_tunnels(net, dev_kill_list);
+		bareudp_destroy_tunnels(net, &list);
+
+	/* unregister the devices gathered above */
+	unregister_netdevice_many(&list);
+	rtnl_unlock();
 }
 
 static struct pernet_operations bareudp_net_ops = {
 	.init = bareudp_init_net,
-	.exit_batch_rtnl = bareudp_exit_batch_rtnl,
+	.exit_batch = bareudp_exit_batch_net,
 	.id   = &bareudp_net_id,
 	.size = sizeof(struct bareudp_net),
 };

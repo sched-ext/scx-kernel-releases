@@ -2144,7 +2144,7 @@ static int icm_runtime_resume(struct tb *tb)
 	return 0;
 }
 
-static int icm_start(struct tb *tb, bool not_used)
+static int icm_start(struct tb *tb)
 {
 	struct icm *icm = tb_priv(tb);
 	int ret;

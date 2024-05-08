@@ -15,7 +15,6 @@
 #include "regs/xe_reg_defs.h"
 #include "xe_device.h"
 #include "xe_device_types.h"
-#include "xe_kunit_helpers.h"
 #include "xe_pci_test.h"
 #include "xe_reg_sr.h"
 #include "xe_rtp.h"
@@ -277,7 +276,9 @@ static int xe_rtp_test_init(struct kunit *test)
 	dev = drm_kunit_helper_alloc_device(test);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dev);
 
-	xe = xe_kunit_helper_alloc_xe_device(test, dev);
+	xe = drm_kunit_helper_alloc_drm_device(test, dev,
+					       struct xe_device,
+					       drm, DRIVER_GEM);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, xe);
 
 	/* Initialize an empty device */
@@ -311,3 +312,8 @@ static struct kunit_suite xe_rtp_test_suite = {
 };
 
 kunit_test_suite(xe_rtp_test_suite);
+
+MODULE_AUTHOR("Intel Corporation");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("xe_rtp kunit test");
+MODULE_IMPORT_NS(EXPORTED_FOR_KUNIT_TESTING);

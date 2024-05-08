@@ -1,9 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Portions of this file
- * Copyright(c) 2016-2017 Intel Deutschland GmbH
- * Copyright (C) 2018, 2020-2024 Intel Corporation
- */
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM cfg80211
 
@@ -140,8 +135,7 @@
 		       __field(u32, width)				\
 		       __field(u32, center_freq1)			\
 		       __field(u32, freq1_offset)			\
-		       __field(u32, center_freq2)			\
-		       __field(u16, punctured)
+		       __field(u32, center_freq2)
 #define CHAN_DEF_ASSIGN(chandef)					\
 	do {								\
 		if ((chandef) && (chandef)->chan) {			\
@@ -154,7 +148,6 @@
 			__entry->center_freq1 = (chandef)->center_freq1;\
 			__entry->freq1_offset = (chandef)->freq1_offset;\
 			__entry->center_freq2 = (chandef)->center_freq2;\
-			__entry->punctured = (chandef)->punctured;	\
 		} else {						\
 			__entry->band = 0;				\
 			__entry->control_freq = 0;			\
@@ -163,15 +156,14 @@
 			__entry->center_freq1 = 0;			\
 			__entry->freq1_offset = 0;			\
 			__entry->center_freq2 = 0;			\
-			__entry->punctured = 0;				\
 		}							\
 	} while (0)
 #define CHAN_DEF_PR_FMT							\
-	"band: %d, control freq: %u.%03u, width: %d, cf1: %u.%03u, cf2: %u, punct: 0x%x"
+	"band: %d, control freq: %u.%03u, width: %d, cf1: %u.%03u, cf2: %u"
 #define CHAN_DEF_PR_ARG __entry->band, __entry->control_freq,		\
 			__entry->freq_offset, __entry->width,		\
 			__entry->center_freq1, __entry->freq1_offset,	\
-			__entry->center_freq2, __entry->punctured
+			__entry->center_freq2
 
 #define FILS_AAD_ASSIGN(fa)						\
 	do {								\
@@ -818,8 +810,8 @@ DECLARE_EVENT_CLASS(station_add_change,
 			params->link_sta_params.opmode_notif_used;
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", station mac: %pM"
-		  ", station flags mask: 0x%x, station flags set: 0x%x, "
-		  "station modify mask: 0x%x, listen interval: %d, aid: %u, "
+		  ", station flags mask: %u, station flags set: %u, "
+		  "station modify mask: %u, listen interval: %d, aid: %u, "
 		  "plink action: %u, plink state: %u, uapsd queues: %u, vlan:%s",
 		  WIPHY_PR_ARG, NETDEV_PR_ARG, __entry->sta_mac,
 		  __entry->sta_flags_mask, __entry->sta_flags_set,
@@ -867,7 +859,6 @@ DECLARE_EVENT_CLASS(station_del,
 		MAC_ENTRY(sta_mac)
 		__field(u8, subtype)
 		__field(u16, reason_code)
-		__field(int, link_id)
 	),
 	TP_fast_assign(
 		WIPHY_ASSIGN;
@@ -875,13 +866,11 @@ DECLARE_EVENT_CLASS(station_del,
 		MAC_ASSIGN(sta_mac, params->mac);
 		__entry->subtype = params->subtype;
 		__entry->reason_code = params->reason_code;
-		__entry->link_id = params->link_id;
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", station mac: %pM"
-		  ", subtype: %u, reason_code: %u, link_id: %d",
+		  ", subtype: %u, reason_code: %u",
 		  WIPHY_PR_ARG, NETDEV_PR_ARG, __entry->sta_mac,
-		  __entry->subtype, __entry->reason_code,
-		  __entry->link_id)
+		  __entry->subtype, __entry->reason_code)
 );
 
 DEFINE_EVENT(station_del, rdev_del_station,
@@ -1024,7 +1013,7 @@ TRACE_EVENT(rdev_get_mpp,
 TRACE_EVENT(rdev_dump_mpp,
 	TP_PROTO(struct wiphy *wiphy, struct net_device *netdev, int _idx,
 		 u8 *dst, u8 *mpp),
-	TP_ARGS(wiphy, netdev, _idx, dst, mpp),
+	TP_ARGS(wiphy, netdev, _idx, mpp, dst),
 	TP_STRUCT__entry(
 		WIPHY_ENTRY
 		NETDEV_ENTRY
@@ -1075,7 +1064,7 @@ TRACE_EVENT(rdev_return_int_mpath_info,
 	),
 	TP_printk(WIPHY_PR_FMT ", returned %d. mpath info - generation: %d, "
 		  "filled: %u, frame qlen: %u, sn: %u, metric: %u, exptime: %u,"
-		  " discovery timeout: %u, discovery retries: %u, flags: 0x%x",
+		  " discovery timeout: %u, discovery retries: %u, flags: %u",
 		  WIPHY_PR_ARG, __entry->ret, __entry->generation,
 		  __entry->filled, __entry->frame_qlen, __entry->sn,
 		  __entry->metric, __entry->exptime, __entry->discovery_timeout,
@@ -1317,7 +1306,7 @@ TRACE_EVENT(rdev_assoc,
 			       req->fils_nonces, 2 * FILS_NONCE_LEN);
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", bssid: %pM"
-		  ", previous bssid: %pM, use mfp: %s, flags: 0x%x",
+		  ", previous bssid: %pM, use mfp: %s, flags: %u",
 		  WIPHY_PR_ARG, NETDEV_PR_ARG, __entry->bssid,
 		  __entry->prev_bssid, BOOL_TO_STR(__entry->use_mfp),
 		  __entry->flags)
@@ -1439,7 +1428,7 @@ TRACE_EVENT(rdev_connect,
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", bssid: %pM"
 		  ", ssid: %s, auth type: %d, privacy: %s, wpa versions: %u, "
-		  "flags: 0x%x, previous bssid: %pM",
+		  "flags: %u, previous bssid: %pM",
 		  WIPHY_PR_ARG, NETDEV_PR_ARG, __entry->bssid, __entry->ssid,
 		  __entry->auth_type, BOOL_TO_STR(__entry->privacy),
 		  __entry->wpa_versions, __entry->flags, __entry->prev_bssid)
@@ -1758,7 +1747,7 @@ TRACE_EVENT(rdev_return_void_tx_rx,
 
 DECLARE_EVENT_CLASS(tx_rx_evt,
 	TP_PROTO(struct wiphy *wiphy, u32 tx, u32 rx),
-	TP_ARGS(wiphy, tx, rx),
+	TP_ARGS(wiphy, rx, tx),
 	TP_STRUCT__entry(
 		WIPHY_ENTRY
 		__field(u32, tx)
@@ -1775,7 +1764,7 @@ DECLARE_EVENT_CLASS(tx_rx_evt,
 
 DEFINE_EVENT(tx_rx_evt, rdev_set_antenna,
 	TP_PROTO(struct wiphy *wiphy, u32 tx, u32 rx),
-	TP_ARGS(wiphy, tx, rx)
+	TP_ARGS(wiphy, rx, tx)
 );
 
 DECLARE_EVENT_CLASS(wiphy_netdev_id_evt,
@@ -2335,7 +2324,6 @@ TRACE_EVENT(rdev_channel_switch,
 		__field(u8, count)
 		__dynamic_array(u16, bcn_ofs, params->n_counter_offsets_beacon)
 		__dynamic_array(u16, pres_ofs, params->n_counter_offsets_presp)
-		__field(u8, link_id)
 	),
 	TP_fast_assign(
 		WIPHY_ASSIGN;
@@ -2353,13 +2341,11 @@ TRACE_EVENT(rdev_channel_switch,
 			memcpy(__get_dynamic_array(pres_ofs),
 			       params->counter_offsets_presp,
 			       params->n_counter_offsets_presp * sizeof(u16));
-		__entry->link_id = params->link_id;
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", " CHAN_DEF_PR_FMT
-		  ", block_tx: %d, count: %u, radar_required: %d, link_id: %d",
+		  ", block_tx: %d, count: %u, radar_required: %d",
 		  WIPHY_PR_ARG, NETDEV_PR_ARG, CHAN_DEF_PR_ARG,
-		  __entry->block_tx, __entry->count, __entry->radar_required,
-		  __entry->link_id)
+		  __entry->block_tx, __entry->count, __entry->radar_required)
 );
 
 TRACE_EVENT(rdev_set_qos_map,
@@ -3281,39 +3267,47 @@ TRACE_EVENT(cfg80211_chandef_dfs_required,
 TRACE_EVENT(cfg80211_ch_switch_notify,
 	TP_PROTO(struct net_device *netdev,
 		 struct cfg80211_chan_def *chandef,
-		 unsigned int link_id),
-	TP_ARGS(netdev, chandef, link_id),
+		 unsigned int link_id,
+		 u16 punct_bitmap),
+	TP_ARGS(netdev, chandef, link_id, punct_bitmap),
 	TP_STRUCT__entry(
 		NETDEV_ENTRY
 		CHAN_DEF_ENTRY
 		__field(unsigned int, link_id)
+		__field(u16, punct_bitmap)
 	),
 	TP_fast_assign(
 		NETDEV_ASSIGN;
 		CHAN_DEF_ASSIGN(chandef);
 		__entry->link_id = link_id;
+		__entry->punct_bitmap = punct_bitmap;
 	),
-	TP_printk(NETDEV_PR_FMT ", " CHAN_DEF_PR_FMT ", link:%d",
-		  NETDEV_PR_ARG, CHAN_DEF_PR_ARG, __entry->link_id)
+	TP_printk(NETDEV_PR_FMT ", " CHAN_DEF_PR_FMT ", link:%d, punct_bitmap:%u",
+		  NETDEV_PR_ARG, CHAN_DEF_PR_ARG, __entry->link_id,
+		  __entry->punct_bitmap)
 );
 
 TRACE_EVENT(cfg80211_ch_switch_started_notify,
 	TP_PROTO(struct net_device *netdev,
 		 struct cfg80211_chan_def *chandef,
-		 unsigned int link_id),
-	TP_ARGS(netdev, chandef, link_id),
+		 unsigned int link_id,
+		 u16 punct_bitmap),
+	TP_ARGS(netdev, chandef, link_id, punct_bitmap),
 	TP_STRUCT__entry(
 		NETDEV_ENTRY
 		CHAN_DEF_ENTRY
 		__field(unsigned int, link_id)
+		__field(u16, punct_bitmap)
 	),
 	TP_fast_assign(
 		NETDEV_ASSIGN;
 		CHAN_DEF_ASSIGN(chandef);
 		__entry->link_id = link_id;
+		__entry->punct_bitmap = punct_bitmap;
 	),
-	TP_printk(NETDEV_PR_FMT ", " CHAN_DEF_PR_FMT ", link:%d",
-		  NETDEV_PR_ARG, CHAN_DEF_PR_ARG, __entry->link_id)
+	TP_printk(NETDEV_PR_FMT ", " CHAN_DEF_PR_FMT ", link:%d, punct_bitmap:%u",
+		  NETDEV_PR_ARG, CHAN_DEF_PR_ARG, __entry->link_id,
+		  __entry->punct_bitmap)
 );
 
 TRACE_EVENT(cfg80211_radar_event,

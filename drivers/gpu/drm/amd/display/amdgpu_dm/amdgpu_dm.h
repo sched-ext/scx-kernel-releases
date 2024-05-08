@@ -693,7 +693,6 @@ struct amdgpu_dm_connector {
 	struct drm_display_mode freesync_vid_base;
 
 	int psr_skip_count;
-	bool disallow_edp_enter_psr;
 
 	/* Record progress status of mst*/
 	uint8_t mst_status;

@@ -589,23 +589,12 @@ static int aio_setup_ring(struct kioctx *ctx, unsigned int nr_events)
 
 void kiocb_set_cancel_fn(struct kiocb *iocb, kiocb_cancel_fn *cancel)
 {
-	struct aio_kiocb *req;
-	struct kioctx *ctx;
+	struct aio_kiocb *req = container_of(iocb, struct aio_kiocb, rw);
+	struct kioctx *ctx = req->ki_ctx;
 	unsigned long flags;
-
-	/*
-	 * kiocb didn't come from aio or is neither a read nor a write, hence
-	 * ignore it.
-	 */
-	if (!(iocb->ki_flags & IOCB_AIO_RW))
-		return;
-
-	req = container_of(iocb, struct aio_kiocb, rw);
 
 	if (WARN_ON_ONCE(!list_empty(&req->ki_list)))
 		return;
-
-	ctx = req->ki_ctx;
 
 	spin_lock_irqsave(&ctx->ctx_lock, flags);
 	list_add_tail(&req->ki_list, &ctx->active_reqs);
@@ -1202,8 +1191,8 @@ static void aio_complete(struct aio_kiocb *iocb)
 		spin_lock_irqsave(&ctx->wait.lock, flags);
 		list_for_each_entry_safe(curr, next, &ctx->wait.head, w.entry)
 			if (avail >= curr->min_nr) {
-				wake_up_process(curr->w.private);
 				list_del_init_careful(&curr->w.entry);
+				wake_up_process(curr->w.private);
 			}
 		spin_unlock_irqrestore(&ctx->wait.lock, flags);
 	}
@@ -1520,7 +1509,7 @@ static int aio_prep_rw(struct kiocb *req, const struct iocb *iocb)
 	req->ki_complete = aio_complete_rw;
 	req->private = NULL;
 	req->ki_pos = iocb->aio_offset;
-	req->ki_flags = req->ki_filp->f_iocb_flags | IOCB_AIO_RW;
+	req->ki_flags = req->ki_filp->f_iocb_flags;
 	if (iocb->aio_flags & IOCB_FLAG_RESFD)
 		req->ki_flags |= IOCB_EVENTFD;
 	if (iocb->aio_flags & IOCB_FLAG_IOPRIO) {

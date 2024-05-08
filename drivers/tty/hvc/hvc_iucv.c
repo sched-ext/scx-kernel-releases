@@ -1035,10 +1035,6 @@ static const struct attribute_group *hvc_iucv_dev_attr_groups[] = {
 	NULL,
 };
 
-static void hvc_iucv_free(struct device *data)
-{
-	kfree(data);
-}
 
 /**
  * hvc_iucv_alloc() - Allocates a new struct hvc_iucv_private instance
@@ -1101,7 +1097,7 @@ static int __init hvc_iucv_alloc(int id, unsigned int is_console)
 	priv->dev->bus = &iucv_bus;
 	priv->dev->parent = iucv_root;
 	priv->dev->groups = hvc_iucv_dev_attr_groups;
-	priv->dev->release = hvc_iucv_free;
+	priv->dev->release = (void (*)(struct device *)) kfree;
 	rc = device_register(priv->dev);
 	if (rc) {
 		put_device(priv->dev);

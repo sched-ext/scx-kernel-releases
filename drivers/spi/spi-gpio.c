@@ -427,7 +427,7 @@ static int spi_gpio_probe(struct platform_device *pdev)
 	host->cleanup = spi_gpio_cleanup;
 
 	bb = &spi_gpio->bitbang;
-	bb->ctlr = host;
+	bb->master = host;
 	/*
 	 * There is some additional business, apart from driving the CS GPIO
 	 * line, that we need to do on selection. This makes the local

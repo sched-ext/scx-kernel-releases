@@ -1073,7 +1073,7 @@ static int ipmr_cache_report(const struct mr_table *mrt,
 		msg = (struct igmpmsg *)skb_network_header(skb);
 		msg->im_vif = vifi;
 		msg->im_vif_hi = vifi >> 8;
-		ipv4_pktinfo_prepare(mroute_sk, pkt, false);
+		ipv4_pktinfo_prepare(mroute_sk, pkt);
 		memcpy(skb->cb, pkt->cb, sizeof(skb->cb));
 		/* Add our header */
 		igmp = skb_put(skb, sizeof(struct igmphdr));
@@ -1603,11 +1603,9 @@ int ip_mroute_getsockopt(struct sock *sk, int optname, sockptr_t optval,
 
 	if (copy_from_sockptr(&olr, optlen, sizeof(int)))
 		return -EFAULT;
+	olr = min_t(unsigned int, olr, sizeof(int));
 	if (olr < 0)
 		return -EINVAL;
-
-	olr = min_t(unsigned int, olr, sizeof(int));
-
 	if (copy_to_sockptr(optlen, &olr, sizeof(int)))
 		return -EFAULT;
 	if (copy_to_sockptr(optval, &val, olr))
@@ -2589,9 +2587,7 @@ errout_free:
 
 static int ipmr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb)
 {
-	struct fib_dump_filter filter = {
-		.rtnl_held = true,
-	};
+	struct fib_dump_filter filter = {};
 	int err;
 
 	if (cb->strict_check) {
@@ -3143,7 +3139,10 @@ int __init ip_mr_init(void)
 {
 	int err;
 
-	mrt_cachep = KMEM_CACHE(mfc_cache, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+	mrt_cachep = kmem_cache_create("ip_mrt_cache",
+				       sizeof(struct mfc_cache),
+				       0, SLAB_HWCACHE_ALIGN | SLAB_PANIC,
+				       NULL);
 
 	err = register_pernet_subsys(&ipmr_net_ops);
 	if (err)

@@ -167,7 +167,7 @@ xfs_get_acl(struct inode *inode, int type, bool rcu)
 		acl = ERR_PTR(error);
 	}
 
-	kvfree(args.value);
+	kmem_free(args.value);
 	return acl;
 }
 
@@ -204,7 +204,7 @@ __xfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 	}
 
 	error = xfs_attr_change(&args);
-	kvfree(args.value);
+	kmem_free(args.value);
 
 	/*
 	 * If the attribute didn't exist to start with that's fine.

@@ -358,9 +358,7 @@ int kernfs_get_tree(struct fs_context *fc)
 		}
 		sb->s_flags |= SB_ACTIVE;
 
-		uuid_t uuid;
-		uuid_gen(&uuid);
-		super_set_uuid(sb, uuid.b, sizeof(uuid));
+		uuid_gen(&sb->s_uuid);
 
 		down_write(&root->kernfs_supers_rwsem);
 		list_add(&info->node, &info->root->supers);

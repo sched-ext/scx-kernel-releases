@@ -378,15 +378,11 @@ static int wmt_i2c_probe(struct platform_device *pdev)
 
 	err = i2c_add_adapter(adap);
 	if (err)
-		goto err_disable_clk;
+		return err;
 
 	platform_set_drvdata(pdev, i2c_dev);
 
 	return 0;
-
-err_disable_clk:
-	clk_disable_unprepare(i2c_dev->clk);
-	return err;
 }
 
 static void wmt_i2c_remove(struct platform_device *pdev)

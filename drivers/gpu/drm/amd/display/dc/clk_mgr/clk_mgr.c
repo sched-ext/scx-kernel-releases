@@ -23,6 +23,8 @@
  *
  */
 
+#include <linux/slab.h>
+
 #include "dal_asic_id.h"
 #include "dc_types.h"
 #include "dccg.h"
@@ -338,6 +340,7 @@ struct clk_mgr *dc_clk_mgr_create(struct dc_context *ctx, struct pp_smu_funcs *p
 
 	    dcn32_clk_mgr_construct(ctx, clk_mgr, pp_smu, dccg);
 	    return &clk_mgr->base;
+	    break;
 	}
 
 	case AMDGPU_FAMILY_GC_11_0_1: {

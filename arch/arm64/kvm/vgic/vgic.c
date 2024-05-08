@@ -30,8 +30,7 @@ struct vgic_global kvm_vgic_global_state __ro_after_init = {
  *         its->its_lock (mutex)
  *           vgic_cpu->ap_list_lock		must be taken with IRQs disabled
  *             kvm->lpi_list_lock		must be taken with IRQs disabled
- *               vgic_dist->lpi_xa.xa_lock	must be taken with IRQs disabled
- *                 vgic_irq->irq_lock		must be taken with IRQs disabled
+ *               vgic_irq->irq_lock		must be taken with IRQs disabled
  *
  * As the ap_list_lock might be taken from the timer interrupt handler,
  * we have to disable IRQs before taking this lock and everything lower
@@ -55,22 +54,32 @@ struct vgic_global kvm_vgic_global_state __ro_after_init = {
  */
 
 /*
- * Index the VM's xarray of mapped LPIs and return a reference to the IRQ
- * structure. The caller is expected to call vgic_put_irq() later once it's
- * finished with the IRQ.
+ * Iterate over the VM's list of mapped LPIs to find the one with a
+ * matching interrupt ID and return a reference to the IRQ structure.
  */
 static struct vgic_irq *vgic_get_lpi(struct kvm *kvm, u32 intid)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
 	struct vgic_irq *irq = NULL;
+	unsigned long flags;
 
-	rcu_read_lock();
+	raw_spin_lock_irqsave(&dist->lpi_list_lock, flags);
 
-	irq = xa_load(&dist->lpi_xa, intid);
-	if (!vgic_try_get_irq_kref(irq))
-		irq = NULL;
+	list_for_each_entry(irq, &dist->lpi_list_head, lpi_list) {
+		if (irq->intid != intid)
+			continue;
 
-	rcu_read_unlock();
+		/*
+		 * This increases the refcount, the caller is expected to
+		 * call vgic_put_irq() later once it's finished with the IRQ.
+		 */
+		vgic_get_irq_kref(irq);
+		goto out_unlock;
+	}
+	irq = NULL;
+
+out_unlock:
+	raw_spin_unlock_irqrestore(&dist->lpi_list_lock, flags);
 
 	return irq;
 }
@@ -111,6 +120,22 @@ static void vgic_irq_release(struct kref *ref)
 {
 }
 
+/*
+ * Drop the refcount on the LPI. Must be called with lpi_list_lock held.
+ */
+void __vgic_put_lpi_locked(struct kvm *kvm, struct vgic_irq *irq)
+{
+	struct vgic_dist *dist = &kvm->arch.vgic;
+
+	if (!kref_put(&irq->refcount, vgic_irq_release))
+		return;
+
+	list_del(&irq->lpi_list);
+	dist->lpi_list_count--;
+
+	kfree(irq);
+}
+
 void vgic_put_irq(struct kvm *kvm, struct vgic_irq *irq)
 {
 	struct vgic_dist *dist = &kvm->arch.vgic;
@@ -119,15 +144,9 @@ void vgic_put_irq(struct kvm *kvm, struct vgic_irq *irq)
 	if (irq->intid < VGIC_MIN_LPI)
 		return;
 
-	if (!kref_put(&irq->refcount, vgic_irq_release))
-		return;
-
-	xa_lock_irqsave(&dist->lpi_xa, flags);
-	__xa_erase(&dist->lpi_xa, irq->intid);
-	xa_unlock_irqrestore(&dist->lpi_xa, flags);
-
-	atomic_dec(&dist->lpi_count);
-	kfree_rcu(irq, rcu);
+	raw_spin_lock_irqsave(&dist->lpi_list_lock, flags);
+	__vgic_put_lpi_locked(kvm, irq);
+	raw_spin_unlock_irqrestore(&dist->lpi_list_lock, flags);
 }
 
 void vgic_flush_pending_lpis(struct kvm_vcpu *vcpu)
@@ -184,7 +203,7 @@ void vgic_irq_set_phys_active(struct vgic_irq *irq, bool active)
 }
 
 /**
- * vgic_target_oracle - compute the target vcpu for an irq
+ * kvm_vgic_target_oracle - compute the target vcpu for an irq
  *
  * @irq:	The irq to route. Must be already locked.
  *
@@ -385,8 +404,7 @@ retry:
 
 	/*
 	 * Grab a reference to the irq to reflect the fact that it is
-	 * now in the ap_list. This is safe as the caller must already hold a
-	 * reference on the irq.
+	 * now in the ap_list.
 	 */
 	vgic_get_irq_kref(irq);
 	list_add_tail(&irq->ap_list, &vcpu->arch.vgic_cpu.ap_list_head);

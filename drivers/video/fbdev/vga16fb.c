@@ -1353,11 +1353,7 @@ static int vga16fb_probe(struct platform_device *dev)
 	info->var = vga16fb_defined;
 	info->fix = vga16fb_fix;
 	/* supports rectangles with widths of multiples of 8 */
-	bitmap_zero(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
-	set_bit(8 - 1, info->pixmap.blit_x);
-	set_bit(16 - 1, info->pixmap.blit_x);
-	set_bit(24 - 1, info->pixmap.blit_x);
-	set_bit(32 - 1, info->pixmap.blit_x);
+	info->pixmap.blit_x = 1 << 7 | 1 << 15 | 1 << 23 | 1 << 31;
 	info->flags = FBINFO_HWACCEL_YPAN;
 
 	i = (info->var.bits_per_pixel == 8) ? 256 : 16;

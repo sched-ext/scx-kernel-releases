@@ -88,8 +88,6 @@ static int bch2_direct_IO_read(struct kiocb *req, struct iov_iter *iter)
 		return ret;
 
 	shorten = iov_iter_count(iter) - round_up(ret, block_bytes(c));
-	if (shorten >= iter->count)
-		shorten = 0;
 	iter->count -= shorten;
 
 	bio = bio_alloc_bioset(NULL,
@@ -387,8 +385,6 @@ static __always_inline long bch2_dio_write_done(struct dio_write *dio)
 	ret = dio->op.error ?: ((long) dio->written << 9);
 	bio_put(&dio->op.wbio.bio);
 
-	bch2_write_ref_put(dio->op.c, BCH_WRITE_REF_dio_write);
-
 	/* inode->i_dio_count is our ref on inode and thus bch_fs */
 	inode_dio_end(&inode->v);
 
@@ -538,7 +534,7 @@ static __always_inline long bch2_dio_write_loop(struct dio_write *dio)
 		if (likely(!dio->iter.count) || dio->op.error)
 			break;
 
-		bio_reset(bio, NULL, REQ_OP_WRITE | REQ_SYNC | REQ_IDLE);
+		bio_reset(bio, NULL, REQ_OP_WRITE);
 	}
 out:
 	return bch2_dio_write_done(dio);
@@ -592,25 +588,22 @@ ssize_t bch2_direct_write(struct kiocb *req, struct iov_iter *iter)
 	prefetch(&inode->ei_inode);
 	prefetch((void *) &inode->ei_inode + 64);
 
-	if (!bch2_write_ref_tryget(c, BCH_WRITE_REF_dio_write))
-		return -EROFS;
-
 	inode_lock(&inode->v);
 
 	ret = generic_write_checks(req, iter);
 	if (unlikely(ret <= 0))
-		goto err_put_write_ref;
+		goto err;
 
 	ret = file_remove_privs(file);
 	if (unlikely(ret))
-		goto err_put_write_ref;
+		goto err;
 
 	ret = file_update_time(file);
 	if (unlikely(ret))
-		goto err_put_write_ref;
+		goto err;
 
 	if (unlikely((req->ki_pos|iter->count) & (block_bytes(c) - 1)))
-		goto err_put_write_ref;
+		goto err;
 
 	inode_dio_begin(&inode->v);
 	bch2_pagecache_block_get(inode);
@@ -623,7 +616,7 @@ ssize_t bch2_direct_write(struct kiocb *req, struct iov_iter *iter)
 
 	bio = bio_alloc_bioset(NULL,
 			       bio_iov_vecs_to_alloc(iter, BIO_MAX_VECS),
-			       REQ_OP_WRITE | REQ_SYNC | REQ_IDLE,
+			       REQ_OP_WRITE,
 			       GFP_KERNEL,
 			       &c->dio_write_bioset);
 	dio = container_of(bio, struct dio_write, op.wbio.bio);
@@ -650,7 +643,7 @@ ssize_t bch2_direct_write(struct kiocb *req, struct iov_iter *iter)
 	}
 
 	ret = bch2_dio_write_loop(dio);
-out:
+err:
 	if (locked)
 		inode_unlock(&inode->v);
 	return ret;
@@ -658,9 +651,7 @@ err_put_bio:
 	bch2_pagecache_block_put(inode);
 	bio_put(bio);
 	inode_dio_end(&inode->v);
-err_put_write_ref:
-	bch2_write_ref_put(c, BCH_WRITE_REF_dio_write);
-	goto out;
+	goto err;
 }
 
 void bch2_fs_fs_io_direct_exit(struct bch_fs *c)

@@ -256,7 +256,12 @@ static void silicom_gpio_set(struct gpio_chip *gc,
 	if (direction == GPIO_LINE_DIRECTION_IN)
 		return;
 
-	silicom_mec_port_set(channel, !value);
+	if (value)
+		silicom_mec_port_set(channel, 0);
+	else if (value == 0)
+		silicom_mec_port_set(channel, 1);
+	else
+		pr_err("Wrong argument value: %d\n", value);
 }
 
 static int silicom_gpio_direction_output(struct gpio_chip *gc,

@@ -97,7 +97,6 @@ struct amdgpu_coredump_info {
 	struct amdgpu_task_info         reset_task_info;
 	struct timespec64               reset_time;
 	bool                            reset_vram_lost;
-	struct amdgpu_ring			*ring;
 };
 #endif
 

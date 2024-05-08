@@ -19,8 +19,8 @@
 
 	aliases {
 		mmc0 = &sdhci;
-		mmc1 = &sdmmc;
-		mmc2 = &sdio;
+		mmc1 = &sdio;
+		mmc2 = &sdmmc;
 	};
 
 	analog-sound {

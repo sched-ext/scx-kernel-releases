@@ -19,7 +19,6 @@
 #include <bpf/libbpf.h>
 
 #include "cgroup_helpers.h"
-#include "testing_helpers.h"
 #include "bpf_util.h"
 
 #ifndef ENOTSUPP
@@ -680,7 +679,7 @@ static int load_path(const struct sock_addr_test *test, const char *path)
 
 	bpf_program__set_type(prog, BPF_PROG_TYPE_CGROUP_SOCK_ADDR);
 	bpf_program__set_expected_attach_type(prog, test->expected_attach_type);
-	bpf_program__set_flags(prog, testing_prog_flags());
+	bpf_program__set_flags(prog, BPF_F_TEST_RND_HI32 | BPF_F_TEST_REG_INVARIANTS);
 
 	err = bpf_object__load(obj);
 	if (err) {

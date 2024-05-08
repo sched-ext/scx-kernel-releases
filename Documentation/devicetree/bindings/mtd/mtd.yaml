@@ -10,8 +10,6 @@ maintainers:
   - Miquel Raynal <miquel.raynal@bootlin.com>
   - Richard Weinberger <richard@nod.at>
 
-select: false
-
 properties:
   $nodename:
     pattern: "^(flash|.*sram|nand)(@.*)?$"

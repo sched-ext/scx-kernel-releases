@@ -192,5 +192,4 @@ static struct platform_driver avs_rt5514_driver = {
 
 module_platform_driver(avs_rt5514_driver);
 
-MODULE_DESCRIPTION("Intel rt5514 machine driver");
 MODULE_LICENSE("GPL");

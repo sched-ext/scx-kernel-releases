@@ -187,36 +187,31 @@ static struct mlx5_profile profile[] = {
 };
 
 static int wait_fw_init(struct mlx5_core_dev *dev, u32 max_wait_mili,
-			u32 warn_time_mili, const char *init_state)
+			u32 warn_time_mili)
 {
 	unsigned long warn = jiffies + msecs_to_jiffies(warn_time_mili);
 	unsigned long end = jiffies + msecs_to_jiffies(max_wait_mili);
 	u32 fw_initializing;
+	int err = 0;
 
 	do {
 		fw_initializing = ioread32be(&dev->iseg->initializing);
 		if (!(fw_initializing >> 31))
 			break;
-		if (time_after(jiffies, end)) {
-			mlx5_core_err(dev, "Firmware over %u MS in %s state, aborting\n",
-				      max_wait_mili, init_state);
-			return -ETIMEDOUT;
-		}
-		if (test_bit(MLX5_BREAK_FW_WAIT, &dev->intf_state)) {
-			mlx5_core_warn(dev, "device is being removed, stop waiting for FW %s\n",
-				       init_state);
-			return -ENODEV;
+		if (time_after(jiffies, end) ||
+		    test_bit(MLX5_BREAK_FW_WAIT, &dev->intf_state)) {
+			err = -EBUSY;
+			break;
 		}
 		if (warn_time_mili && time_after(jiffies, warn)) {
-			mlx5_core_warn(dev, "Waiting for FW %s, timeout abort in %ds (0x%x)\n",
-				       init_state, jiffies_to_msecs(end - warn) / 1000,
-				       fw_initializing);
+			mlx5_core_warn(dev, "Waiting for FW initialization, timeout abort in %ds (0x%x)\n",
+				       jiffies_to_msecs(end - warn) / 1000, fw_initializing);
 			warn = jiffies + msecs_to_jiffies(warn_time_mili);
 		}
 		msleep(mlx5_tout_ms(dev, FW_PRE_INIT_WAIT));
 	} while (true);
 
-	return 0;
+	return err;
 }
 
 static void mlx5_set_driver_version(struct mlx5_core_dev *dev)
@@ -956,7 +951,7 @@ static void mlx5_register_hca_devcom_comp(struct mlx5_core_dev *dev)
 		mlx5_devcom_register_component(dev->priv.devc, MLX5_DEVCOM_HCA_PORTS,
 					       mlx5_query_nic_system_image_guid(dev),
 					       NULL, dev);
-	if (IS_ERR(dev->priv.hca_devcom_comp))
+	if (IS_ERR_OR_NULL(dev->priv.hca_devcom_comp))
 		mlx5_core_err(dev, "Failed to register devcom HCA component\n");
 }
 
@@ -1156,10 +1151,12 @@ static int mlx5_function_enable(struct mlx5_core_dev *dev, bool boot, u64 timeou
 	/* wait for firmware to accept initialization segments configurations
 	 */
 	err = wait_fw_init(dev, timeout,
-			   mlx5_tout_ms(dev, FW_PRE_INIT_WARN_MESSAGE_INTERVAL),
-			   "pre-initializing");
-	if (err)
+			   mlx5_tout_ms(dev, FW_PRE_INIT_WARN_MESSAGE_INTERVAL));
+	if (err) {
+		mlx5_core_err(dev, "Firmware over %llu MS in pre-initializing state, aborting\n",
+			      timeout);
 		return err;
+	}
 
 	err = mlx5_cmd_enable(dev);
 	if (err) {
@@ -1169,9 +1166,12 @@ static int mlx5_function_enable(struct mlx5_core_dev *dev, bool boot, u64 timeou
 
 	mlx5_tout_query_iseg(dev);
 
-	err = wait_fw_init(dev, mlx5_tout_ms(dev, FW_INIT), 0, "initializing");
-	if (err)
+	err = wait_fw_init(dev, mlx5_tout_ms(dev, FW_INIT), 0);
+	if (err) {
+		mlx5_core_err(dev, "Firmware over %llu MS in initializing state, aborting\n",
+			      mlx5_tout_ms(dev, FW_INIT));
 		goto err_cmd_cleanup;
+	}
 
 	dev->caps.embedded_cpu = mlx5_read_embedded_cpu(dev);
 	mlx5_cmd_set_state(dev, MLX5_CMDIF_STATE_UP);
@@ -1480,14 +1480,6 @@ int mlx5_init_one_devl_locked(struct mlx5_core_dev *dev)
 	if (err)
 		goto err_register;
 
-	err = mlx5_crdump_enable(dev);
-	if (err)
-		mlx5_core_err(dev, "mlx5_crdump_enable failed with error code %d\n", err);
-
-	err = mlx5_hwmon_dev_register(dev);
-	if (err)
-		mlx5_core_err(dev, "mlx5_hwmon_dev_register failed with error code %d\n", err);
-
 	mutex_unlock(&dev->intf_state_mutex);
 	return 0;
 
@@ -1513,10 +1505,7 @@ int mlx5_init_one(struct mlx5_core_dev *dev)
 	int err;
 
 	devl_lock(devlink);
-	devl_register(devlink);
 	err = mlx5_init_one_devl_locked(dev);
-	if (err)
-		devl_unregister(devlink);
 	devl_unlock(devlink);
 	return err;
 }
@@ -1528,8 +1517,6 @@ void mlx5_uninit_one(struct mlx5_core_dev *dev)
 	devl_lock(devlink);
 	mutex_lock(&dev->intf_state_mutex);
 
-	mlx5_hwmon_dev_unregister(dev);
-	mlx5_crdump_disable(dev);
 	mlx5_unregister_device(dev);
 
 	if (!test_bit(MLX5_INTERFACE_STATE_UP, &dev->intf_state)) {
@@ -1547,7 +1534,6 @@ void mlx5_uninit_one(struct mlx5_core_dev *dev)
 	mlx5_function_teardown(dev, true);
 out:
 	mutex_unlock(&dev->intf_state_mutex);
-	devl_unregister(devlink);
 	devl_unlock(devlink);
 }
 
@@ -1694,23 +1680,16 @@ int mlx5_init_one_light(struct mlx5_core_dev *dev)
 	}
 
 	devl_lock(devlink);
-	devl_register(devlink);
-
 	err = mlx5_devlink_params_register(priv_to_devlink(dev));
+	devl_unlock(devlink);
 	if (err) {
 		mlx5_core_warn(dev, "mlx5_devlink_param_reg err = %d\n", err);
-		goto params_reg_err;
+		goto query_hca_caps_err;
 	}
 
-	devl_unlock(devlink);
 	return 0;
 
-params_reg_err:
-	devl_unregister(devlink);
-	devl_unlock(devlink);
 query_hca_caps_err:
-	devl_unregister(devlink);
-	devl_unlock(devlink);
 	mlx5_function_disable(dev, true);
 out:
 	dev->state = MLX5_DEVICE_STATE_INTERNAL_ERROR;
@@ -1723,7 +1702,6 @@ void mlx5_uninit_one_light(struct mlx5_core_dev *dev)
 
 	devl_lock(devlink);
 	mlx5_devlink_params_unregister(priv_to_devlink(dev));
-	devl_unregister(devlink);
 	devl_unlock(devlink);
 	if (dev->state != MLX5_DEVICE_STATE_UP)
 		return;
@@ -1965,7 +1943,16 @@ static int probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_init_one;
 	}
 
+	err = mlx5_crdump_enable(dev);
+	if (err)
+		dev_err(&pdev->dev, "mlx5_crdump_enable failed with error code %d\n", err);
+
+	err = mlx5_hwmon_dev_register(dev);
+	if (err)
+		mlx5_core_err(dev, "mlx5_hwmon_dev_register failed with error code %d\n", err);
+
 	pci_save_state(pdev);
+	devlink_register(devlink);
 	return 0;
 
 err_init_one:
@@ -1986,9 +1973,16 @@ static void remove_one(struct pci_dev *pdev)
 	struct devlink *devlink = priv_to_devlink(dev);
 
 	set_bit(MLX5_BREAK_FW_WAIT, &dev->intf_state);
+	/* mlx5_drain_fw_reset() and mlx5_drain_health_wq() are using
+	 * devlink notify APIs.
+	 * Hence, we must drain them before unregistering the devlink.
+	 */
 	mlx5_drain_fw_reset(dev);
 	mlx5_drain_health_wq(dev);
+	devlink_unregister(devlink);
 	mlx5_sriov_disable(pdev, false);
+	mlx5_hwmon_dev_unregister(dev);
+	mlx5_crdump_disable(dev);
 	mlx5_uninit_one(dev);
 	mlx5_pci_close(dev);
 	mlx5_mdev_uninit(dev);

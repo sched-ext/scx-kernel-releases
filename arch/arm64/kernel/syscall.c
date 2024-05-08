@@ -20,11 +20,14 @@ long sys_ni_syscall(void);
 
 static long do_ni_syscall(struct pt_regs *regs, int scno)
 {
+#ifdef CONFIG_COMPAT
+	long ret;
 	if (is_compat_task()) {
-		long ret = compat_arm_syscall(regs, scno);
+		ret = compat_arm_syscall(regs, scno);
 		if (ret != -ENOSYS)
 			return ret;
 	}
+#endif
 
 	return sys_ni_syscall();
 }

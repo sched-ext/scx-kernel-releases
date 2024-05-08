@@ -24,8 +24,6 @@
 
 static int __initdata_or_module debug_callthunks;
 
-#define MAX_PATCH_LEN (255-1)
-
 #define prdbg(fmt, args...)					\
 do {								\
 	if (debug_callthunks)					\
@@ -44,8 +42,8 @@ DEFINE_PER_CPU(u64, __x86_call_count);
 DEFINE_PER_CPU(u64, __x86_ret_count);
 DEFINE_PER_CPU(u64, __x86_stuffs_count);
 DEFINE_PER_CPU(u64, __x86_ctxsw_count);
-EXPORT_PER_CPU_SYMBOL_GPL(__x86_ctxsw_count);
-EXPORT_PER_CPU_SYMBOL_GPL(__x86_call_count);
+EXPORT_SYMBOL_GPL(__x86_ctxsw_count);
+EXPORT_SYMBOL_GPL(__x86_call_count);
 #endif
 
 extern s32 __call_sites[], __call_sites_end[];
@@ -181,15 +179,10 @@ static const u8 nops[] = {
 static void *patch_dest(void *dest, bool direct)
 {
 	unsigned int tsize = SKL_TMPL_SIZE;
-	u8 insn_buff[MAX_PATCH_LEN];
 	u8 *pad = dest - tsize;
 
-	memcpy(insn_buff, skl_call_thunk_template, tsize);
-	apply_relocation(insn_buff, tsize, pad,
-			 skl_call_thunk_template, tsize);
-
 	/* Already patched? */
-	if (!bcmp(pad, insn_buff, tsize))
+	if (!bcmp(pad, skl_call_thunk_template, tsize))
 		return pad;
 
 	/* Ensure there are nops */
@@ -199,9 +192,9 @@ static void *patch_dest(void *dest, bool direct)
 	}
 
 	if (direct)
-		memcpy(pad, insn_buff, tsize);
+		memcpy(pad, skl_call_thunk_template, tsize);
 	else
-		text_poke_copy_locked(pad, insn_buff, tsize, true);
+		text_poke_copy_locked(pad, skl_call_thunk_template, tsize, true);
 	return pad;
 }
 
@@ -297,27 +290,20 @@ void *callthunks_translate_call_dest(void *dest)
 static bool is_callthunk(void *addr)
 {
 	unsigned int tmpl_size = SKL_TMPL_SIZE;
-	u8 insn_buff[MAX_PATCH_LEN];
+	void *tmpl = skl_call_thunk_template;
 	unsigned long dest;
-	u8 *pad;
 
 	dest = roundup((unsigned long)addr, CONFIG_FUNCTION_ALIGNMENT);
 	if (!thunks_initialized || skip_addr((void *)dest))
 		return false;
 
-	pad = (void *)(dest - tmpl_size);
-
-	memcpy(insn_buff, skl_call_thunk_template, tmpl_size);
-	apply_relocation(insn_buff, tmpl_size, pad,
-			 skl_call_thunk_template, tmpl_size);
-
-	return !bcmp(pad, insn_buff, tmpl_size);
+	return !bcmp((void *)(dest - tmpl_size), tmpl, tmpl_size);
 }
 
-int x86_call_depth_emit_accounting(u8 **pprog, void *func, void *ip)
+int x86_call_depth_emit_accounting(u8 **pprog, void *func)
 {
 	unsigned int tmpl_size = SKL_TMPL_SIZE;
-	u8 insn_buff[MAX_PATCH_LEN];
+	void *tmpl = skl_call_thunk_template;
 
 	if (!thunks_initialized)
 		return 0;
@@ -326,11 +312,7 @@ int x86_call_depth_emit_accounting(u8 **pprog, void *func, void *ip)
 	if (func && is_callthunk(func))
 		return 0;
 
-	memcpy(insn_buff, skl_call_thunk_template, tmpl_size);
-	apply_relocation(insn_buff, tmpl_size, ip,
-			 skl_call_thunk_template, tmpl_size);
-
-	memcpy(*pprog, insn_buff, tmpl_size);
+	memcpy(*pprog, tmpl, tmpl_size);
 	*pprog += tmpl_size;
 	return tmpl_size;
 }

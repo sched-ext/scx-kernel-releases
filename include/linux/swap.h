@@ -298,7 +298,7 @@ struct swap_info_struct {
 	unsigned int __percpu *cluster_next_cpu; /*percpu index for next allocation */
 	struct percpu_cluster __percpu *percpu_cluster; /* per cpu's swap location */
 	struct rb_root swap_extent_root;/* root of the swap extent rbtree */
-	struct file *bdev_file;		/* open handle of the bdev */
+	struct bdev_handle *bdev_handle;/* open handle of the bdev */
 	struct block_device *bdev;	/* swap device or bdev of swap file */
 	struct file *swap_file;		/* seldom referenced */
 	unsigned int old_block_size;	/* seldom referenced */
@@ -349,6 +349,16 @@ void workingset_age_nonresident(struct lruvec *lruvec, unsigned long nr_pages);
 void *workingset_eviction(struct folio *folio, struct mem_cgroup *target_memcg);
 void workingset_refault(struct folio *folio, void *shadow);
 void workingset_activation(struct folio *folio);
+
+/* Only track the nodes of mappings with shadow entries */
+void workingset_update_node(struct xa_node *node);
+extern struct list_lru shadow_nodes;
+#define mapping_set_update(xas, mapping) do {				\
+	if (!dax_mapping(mapping) && !shmem_mapping(mapping)) {		\
+		xas_set_update(xas, workingset_update_node);		\
+		xas_set_lru(xas, &shadow_nodes);			\
+	}								\
+} while (0)
 
 /* linux/mm/page_alloc.c */
 extern unsigned long totalreserve_pages;
@@ -437,9 +447,9 @@ static inline unsigned long total_swapcache_pages(void)
 	return global_node_page_state(NR_SWAPCACHE);
 }
 
-void free_swap_cache(struct folio *folio);
-void free_page_and_swap_cache(struct page *);
-void free_pages_and_swap_cache(struct encoded_page **, int);
+extern void free_swap_cache(struct page *page);
+extern void free_page_and_swap_cache(struct page *);
+extern void free_pages_and_swap_cache(struct encoded_page **, int);
 /* linux/mm/swapfile.c */
 extern atomic_long_t nr_swap_pages;
 extern long total_swap_pages;
@@ -521,7 +531,7 @@ static inline void put_swap_device(struct swap_info_struct *si)
 /* used to sanity check ptes in zap_pte_range when CONFIG_SWAP=0 */
 #define free_swap_and_cache(e) is_pfn_swap_entry(e)
 
-static inline void free_swap_cache(struct folio *folio)
+static inline void free_swap_cache(struct page *page)
 {
 }
 
@@ -535,11 +545,6 @@ static inline void swap_shmem_alloc(swp_entry_t swp)
 }
 
 static inline int swap_duplicate(swp_entry_t swp)
-{
-	return 0;
-}
-
-static inline int swapcache_prepare(swp_entry_t swp)
 {
 	return 0;
 }

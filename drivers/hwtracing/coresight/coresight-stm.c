@@ -119,6 +119,7 @@ DEFINE_CORESIGHT_DEVLIST(stm_devs, "stm");
  * @spinlock:		only one at a time pls.
  * @chs:		the channels accociated to this STM.
  * @stm:		structure associated to the generic STM interface.
+ * @mode:		this tracer's mode (enum cs_mode), i.e sysFS, or disabled.
  * @traceid:		value of the current ID for this component.
  * @write_bytes:	Maximus bytes this STM can write at a time.
  * @stmsper:		settings for register STMSPER.
@@ -135,6 +136,7 @@ struct stm_drvdata {
 	spinlock_t		spinlock;
 	struct channel_space	chs;
 	struct stm_data		stm;
+	local_t			mode;
 	u8			traceid;
 	u32			write_bytes;
 	u32			stmsper;
@@ -193,15 +195,17 @@ static void stm_enable_hw(struct stm_drvdata *drvdata)
 static int stm_enable(struct coresight_device *csdev, struct perf_event *event,
 		      enum cs_mode mode)
 {
+	u32 val;
 	struct stm_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 
 	if (mode != CS_MODE_SYSFS)
 		return -EINVAL;
 
-	if (!coresight_take_mode(csdev, mode)) {
-		/* Someone is already using the tracer */
+	val = local_cmpxchg(&drvdata->mode, CS_MODE_DISABLED, mode);
+
+	/* Someone is already using the tracer */
+	if (val)
 		return -EBUSY;
-	}
 
 	pm_runtime_get_sync(csdev->dev.parent);
 
@@ -262,7 +266,7 @@ static void stm_disable(struct coresight_device *csdev,
 	 * change its status.  As such we can read the status here without
 	 * fearing it will change under us.
 	 */
-	if (coresight_get_mode(csdev) == CS_MODE_SYSFS) {
+	if (local_read(&drvdata->mode) == CS_MODE_SYSFS) {
 		spin_lock(&drvdata->spinlock);
 		stm_disable_hw(drvdata);
 		spin_unlock(&drvdata->spinlock);
@@ -272,7 +276,7 @@ static void stm_disable(struct coresight_device *csdev,
 
 		pm_runtime_put(csdev->dev.parent);
 
-		coresight_set_mode(csdev, CS_MODE_DISABLED);
+		local_set(&drvdata->mode, CS_MODE_DISABLED);
 		dev_dbg(&csdev->dev, "STM tracing disabled\n");
 	}
 }
@@ -330,7 +334,7 @@ static int stm_generic_link(struct stm_data *stm_data,
 	if (!drvdata || !drvdata->csdev)
 		return -EINVAL;
 
-	return coresight_enable_sysfs(drvdata->csdev);
+	return coresight_enable(drvdata->csdev);
 }
 
 static void stm_generic_unlink(struct stm_data *stm_data,
@@ -341,7 +345,7 @@ static void stm_generic_unlink(struct stm_data *stm_data,
 	if (!drvdata || !drvdata->csdev)
 		return;
 
-	coresight_disable_sysfs(drvdata->csdev);
+	coresight_disable(drvdata->csdev);
 }
 
 static phys_addr_t
@@ -369,7 +373,7 @@ static long stm_generic_set_options(struct stm_data *stm_data,
 {
 	struct stm_drvdata *drvdata = container_of(stm_data,
 						   struct stm_drvdata, stm);
-	if (!(drvdata && coresight_get_mode(drvdata->csdev)))
+	if (!(drvdata && local_read(&drvdata->mode)))
 		return -EINVAL;
 
 	if (channel >= drvdata->numsp)
@@ -404,7 +408,7 @@ static ssize_t notrace stm_generic_packet(struct stm_data *stm_data,
 						   struct stm_drvdata, stm);
 	unsigned int stm_flags;
 
-	if (!(drvdata && coresight_get_mode(drvdata->csdev)))
+	if (!(drvdata && local_read(&drvdata->mode)))
 		return -EACCES;
 
 	if (channel >= drvdata->numsp)
@@ -511,7 +515,7 @@ static ssize_t port_select_show(struct device *dev,
 	struct stm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 	unsigned long val;
 
-	if (!coresight_get_mode(drvdata->csdev)) {
+	if (!local_read(&drvdata->mode)) {
 		val = drvdata->stmspscr;
 	} else {
 		spin_lock(&drvdata->spinlock);
@@ -537,7 +541,7 @@ static ssize_t port_select_store(struct device *dev,
 	spin_lock(&drvdata->spinlock);
 	drvdata->stmspscr = val;
 
-	if (coresight_get_mode(drvdata->csdev)) {
+	if (local_read(&drvdata->mode)) {
 		CS_UNLOCK(drvdata->base);
 		/* Process as per ARM's TRM recommendation */
 		stmsper = readl_relaxed(drvdata->base + STMSPER);
@@ -558,7 +562,7 @@ static ssize_t port_enable_show(struct device *dev,
 	struct stm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 	unsigned long val;
 
-	if (!coresight_get_mode(drvdata->csdev)) {
+	if (!local_read(&drvdata->mode)) {
 		val = drvdata->stmsper;
 	} else {
 		spin_lock(&drvdata->spinlock);
@@ -584,7 +588,7 @@ static ssize_t port_enable_store(struct device *dev,
 	spin_lock(&drvdata->spinlock);
 	drvdata->stmsper = val;
 
-	if (coresight_get_mode(drvdata->csdev)) {
+	if (local_read(&drvdata->mode)) {
 		CS_UNLOCK(drvdata->base);
 		writel_relaxed(drvdata->stmsper, drvdata->base + STMSPER);
 		CS_LOCK(drvdata->base);
@@ -946,7 +950,7 @@ static const struct dev_pm_ops stm_dev_pm_ops = {
 static const struct amba_id stm_ids[] = {
 	CS_AMBA_ID_DATA(0x000bb962, "STM32"),
 	CS_AMBA_ID_DATA(0x000bb963, "STM500"),
-	{ 0, 0, NULL },
+	{ 0, 0},
 };
 
 MODULE_DEVICE_TABLE(amba, stm_ids);

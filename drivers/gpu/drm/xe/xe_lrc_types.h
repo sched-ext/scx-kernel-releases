@@ -28,11 +28,11 @@ struct xe_lrc {
 
 	/** @ring: submission ring state */
 	struct {
-		/** @ring.size: size of submission ring */
+		/** @size: size of submission ring */
 		u32 size;
-		/** @ring.tail: tail of submission ring */
+		/** @tail: tail of submission ring */
 		u32 tail;
-		/** @ring.old_tail: shadow of tail */
+		/** @old_tail: shadow of tail */
 		u32 old_tail;
 	} ring;
 

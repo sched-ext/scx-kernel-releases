@@ -163,7 +163,7 @@ ipa_table_mem(struct ipa *ipa, bool filter, bool hashed, bool ipv6)
 
 bool ipa_filtered_valid(struct ipa *ipa, u64 filtered)
 {
-	struct device *dev = ipa->dev;
+	struct device *dev = &ipa->pdev->dev;
 	u32 count;
 
 	if (!filtered) {
@@ -236,7 +236,8 @@ ipa_filter_reset_table(struct ipa *ipa, bool hashed, bool ipv6, bool modem)
 
 	trans = ipa_cmd_trans_alloc(ipa, hweight64(ep_mask));
 	if (!trans) {
-		dev_err(ipa->dev, "no transaction for %s filter reset\n",
+		dev_err(&ipa->pdev->dev,
+			"no transaction for %s filter reset\n",
 			modem ? "modem" : "AP");
 		return -EBUSY;
 	}
@@ -297,7 +298,8 @@ static int ipa_route_reset(struct ipa *ipa, bool modem)
 
 	trans = ipa_cmd_trans_alloc(ipa, hash_support ? 4 : 2);
 	if (!trans) {
-		dev_err(ipa->dev, "no transaction for %s route reset\n",
+		dev_err(&ipa->pdev->dev,
+			"no transaction for %s route reset\n",
 			modem ? "modem" : "AP");
 		return -EBUSY;
 	}
@@ -325,7 +327,7 @@ static int ipa_route_reset(struct ipa *ipa, bool modem)
 
 void ipa_table_reset(struct ipa *ipa, bool modem)
 {
-	struct device *dev = ipa->dev;
+	struct device *dev = &ipa->pdev->dev;
 	const char *ee_name;
 	int ret;
 
@@ -354,7 +356,7 @@ int ipa_table_hash_flush(struct ipa *ipa)
 
 	trans = ipa_cmd_trans_alloc(ipa, 1);
 	if (!trans) {
-		dev_err(ipa->dev, "no transaction for hash flush\n");
+		dev_err(&ipa->pdev->dev, "no transaction for hash flush\n");
 		return -EBUSY;
 	}
 
@@ -467,7 +469,7 @@ int ipa_table_setup(struct ipa *ipa)
 	 */
 	trans = ipa_cmd_trans_alloc(ipa, 8);
 	if (!trans) {
-		dev_err(ipa->dev, "no transaction for table setup\n");
+		dev_err(&ipa->pdev->dev, "no transaction for table setup\n");
 		return -EBUSY;
 	}
 
@@ -711,7 +713,7 @@ bool ipa_table_mem_valid(struct ipa *ipa, bool filter)
  */
 int ipa_table_init(struct ipa *ipa)
 {
-	struct device *dev = ipa->dev;
+	struct device *dev = &ipa->pdev->dev;
 	dma_addr_t addr;
 	__le64 le_addr;
 	__le64 *virt;
@@ -761,7 +763,7 @@ int ipa_table_init(struct ipa *ipa)
 void ipa_table_exit(struct ipa *ipa)
 {
 	u32 count = max_t(u32, 1 + ipa->filter_count, ipa->route_count);
-	struct device *dev = ipa->dev;
+	struct device *dev = &ipa->pdev->dev;
 	size_t size;
 
 	size = IPA_ZERO_RULE_SIZE + (1 + count) * sizeof(__le64);

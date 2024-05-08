@@ -38,12 +38,27 @@ static u32 numachip1_get_apic_id(u32 x)
 	return id;
 }
 
+static u32 numachip1_set_apic_id(u32 id)
+{
+	return (id & 0xff) << 24;
+}
+
 static u32 numachip2_get_apic_id(u32 x)
 {
 	u64 mcfg;
 
 	rdmsrl(MSR_FAM10H_MMIO_CONF_BASE, mcfg);
 	return ((mcfg >> (28 - 8)) & 0xfff00) | (x >> 24);
+}
+
+static u32 numachip2_set_apic_id(u32 id)
+{
+	return id << 24;
+}
+
+static u32 numachip_phys_pkg_id(u32 initial_apic_id, int index_msb)
+{
+	return initial_apic_id >> index_msb;
 }
 
 static void numachip1_apic_icr_write(int apicid, unsigned int val)
@@ -212,9 +227,11 @@ static const struct apic apic_numachip1 __refconst = {
 	.disable_esr			= 0,
 
 	.cpu_present_to_apicid		= default_cpu_present_to_apicid,
+	.phys_pkg_id			= numachip_phys_pkg_id,
 
 	.max_apic_id			= UINT_MAX,
 	.get_apic_id			= numachip1_get_apic_id,
+	.set_apic_id			= numachip1_set_apic_id,
 
 	.calc_dest_apicid		= apic_default_calc_apicid,
 
@@ -246,9 +263,11 @@ static const struct apic apic_numachip2 __refconst = {
 	.disable_esr			= 0,
 
 	.cpu_present_to_apicid		= default_cpu_present_to_apicid,
+	.phys_pkg_id			= numachip_phys_pkg_id,
 
 	.max_apic_id			= UINT_MAX,
 	.get_apic_id			= numachip2_get_apic_id,
+	.set_apic_id			= numachip2_set_apic_id,
 
 	.calc_dest_apicid		= apic_default_calc_apicid,
 

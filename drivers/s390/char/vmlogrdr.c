@@ -679,9 +679,7 @@ static const struct attribute_group *vmlogrdr_attr_groups[] = {
 	NULL,
 };
 
-static const struct class vmlogrdr_class = {
-	.name = "vmlogrdr_class",
-};
+static struct class *vmlogrdr_class;
 static struct device_driver vmlogrdr_driver = {
 	.name = "vmlogrdr",
 	.bus  = &iucv_bus,
@@ -701,9 +699,12 @@ static int vmlogrdr_register_driver(void)
 	if (ret)
 		goto out_iucv;
 
-	ret = class_register(&vmlogrdr_class);
-	if (ret)
+	vmlogrdr_class = class_create("vmlogrdr");
+	if (IS_ERR(vmlogrdr_class)) {
+		ret = PTR_ERR(vmlogrdr_class);
+		vmlogrdr_class = NULL;
 		goto out_driver;
+	}
 	return 0;
 
 out_driver:
@@ -717,7 +718,8 @@ out:
 
 static void vmlogrdr_unregister_driver(void)
 {
-	class_unregister(&vmlogrdr_class);
+	class_destroy(vmlogrdr_class);
+	vmlogrdr_class = NULL;
 	driver_unregister(&vmlogrdr_driver);
 	iucv_unregister(&vmlogrdr_iucv_handler, 1);
 }
@@ -752,7 +754,7 @@ static int vmlogrdr_register_device(struct vmlogrdr_priv_t *priv)
 		return ret;
 	}
 
-	priv->class_device = device_create(&vmlogrdr_class, dev,
+	priv->class_device = device_create(vmlogrdr_class, dev,
 					   MKDEV(vmlogrdr_major,
 						 priv->minor_num),
 					   priv, "%s", dev_name(dev));
@@ -769,7 +771,7 @@ static int vmlogrdr_register_device(struct vmlogrdr_priv_t *priv)
 
 static int vmlogrdr_unregister_device(struct vmlogrdr_priv_t *priv)
 {
-	device_destroy(&vmlogrdr_class, MKDEV(vmlogrdr_major, priv->minor_num));
+	device_destroy(vmlogrdr_class, MKDEV(vmlogrdr_major, priv->minor_num));
 	if (priv->device != NULL) {
 		device_unregister(priv->device);
 		priv->device=NULL;

@@ -425,11 +425,12 @@ static int opal_prd_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static void opal_prd_remove(struct platform_device *pdev)
+static int opal_prd_remove(struct platform_device *pdev)
 {
 	misc_deregister(&opal_prd_dev);
 	opal_message_notifier_unregister(OPAL_MSG_PRD, &opal_prd_event_nb);
 	opal_message_notifier_unregister(OPAL_MSG_PRD2, &opal_prd_event_nb2);
+	return 0;
 }
 
 static const struct of_device_id opal_prd_match[] = {
@@ -443,7 +444,7 @@ static struct platform_driver opal_prd_driver = {
 		.of_match_table	= opal_prd_match,
 	},
 	.probe	= opal_prd_probe,
-	.remove_new = opal_prd_remove,
+	.remove	= opal_prd_remove,
 };
 
 module_platform_driver(opal_prd_driver);

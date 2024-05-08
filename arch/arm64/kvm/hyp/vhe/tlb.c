@@ -171,8 +171,7 @@ void __kvm_tlb_flush_vmid_range(struct kvm_s2_mmu *mmu,
 	/* Switch to requested VMID */
 	__tlb_switch_to_guest(mmu, &cxt);
 
-	__flush_s2_tlb_range_op(ipas2e1is, start, pages, stride,
-				TLBI_TTL_UNKNOWN);
+	__flush_s2_tlb_range_op(ipas2e1is, start, pages, stride, 0);
 
 	dsb(ish);
 	__tlbi(vmalle1is);

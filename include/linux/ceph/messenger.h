@@ -283,7 +283,7 @@ struct ceph_msg {
 	struct kref kref;
 	bool more_to_follow;
 	bool needs_out_seq;
-	u64 sparse_read_total;
+	bool sparse_read;
 	int front_alloc_len;
 
 	struct ceph_msgpool *pool;

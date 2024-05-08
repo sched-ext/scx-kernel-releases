@@ -154,9 +154,9 @@ struct packet_stacked_data
 
 struct pktcdvd_device
 {
-	struct file		*bdev_file;	/* dev attached */
+	struct bdev_handle	*bdev_handle;	/* dev attached */
 	/* handle acquired for bdev during pkt_open_dev() */
-	struct file		*f_open_bdev;
+	struct bdev_handle	*open_bdev_handle;
 	dev_t			pkt_dev;	/* our dev */
 	struct packet_settings	settings;
 	struct packet_stats	stats;

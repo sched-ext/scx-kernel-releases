@@ -82,7 +82,15 @@ struct led_init_data {
 	bool devname_mandatory;
 };
 
+#if IS_ENABLED(CONFIG_NEW_LEDS)
 enum led_default_state led_init_default_state_get(struct fwnode_handle *fwnode);
+#else
+static inline enum led_default_state
+led_init_default_state_get(struct fwnode_handle *fwnode)
+{
+	return LEDS_DEFSTATE_OFF;
+}
+#endif
 
 struct led_hw_trigger_type {
 	int dummy;
@@ -271,9 +279,20 @@ static inline int led_classdev_register(struct device *parent,
 	return led_classdev_register_ext(parent, led_cdev, NULL);
 }
 
+#if IS_ENABLED(CONFIG_LEDS_CLASS)
 int devm_led_classdev_register_ext(struct device *parent,
 					  struct led_classdev *led_cdev,
 					  struct led_init_data *init_data);
+#else
+static inline int
+devm_led_classdev_register_ext(struct device *parent,
+			       struct led_classdev *led_cdev,
+			       struct led_init_data *init_data)
+{
+	return 0;
+}
+#endif
+
 static inline int devm_led_classdev_register(struct device *parent,
 					     struct led_classdev *led_cdev)
 {
@@ -639,7 +658,7 @@ struct gpio_led_platform_data {
 	gpio_blink_set_t	gpio_blink_set;
 };
 
-#ifdef CONFIG_LEDS_GPIO_REGISTER
+#ifdef CONFIG_NEW_LEDS
 struct platform_device *gpio_led_register_device(
 		int id, const struct gpio_led_platform_data *pdata);
 #else

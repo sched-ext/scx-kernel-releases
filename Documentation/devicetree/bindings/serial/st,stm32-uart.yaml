@@ -58,9 +58,6 @@ properties:
 
   wakeup-source: true
 
-  power-domains:
-    maxItems: 1
-
   rx-threshold:
     description:
       If value is set to 1, RX FIFO threshold is disabled.

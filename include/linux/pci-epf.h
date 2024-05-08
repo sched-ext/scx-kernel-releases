@@ -15,7 +15,6 @@
 #include <linux/pci.h>
 
 struct pci_epf;
-struct pci_epc_features;
 enum pci_epc_interface_type;
 
 enum pci_barno {
@@ -217,8 +216,7 @@ int __pci_epf_register_driver(struct pci_epf_driver *driver,
 			      struct module *owner);
 void pci_epf_unregister_driver(struct pci_epf_driver *driver);
 void *pci_epf_alloc_space(struct pci_epf *epf, size_t size, enum pci_barno bar,
-			  const struct pci_epc_features *epc_features,
-			  enum pci_epc_interface_type type);
+			  size_t align, enum pci_epc_interface_type type);
 void pci_epf_free_space(struct pci_epf *epf, void *addr, enum pci_barno bar,
 			enum pci_epc_interface_type type);
 int pci_epf_bind(struct pci_epf *epf);

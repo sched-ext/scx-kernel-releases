@@ -107,7 +107,7 @@ static struct wilc_vif *wilc_get_vif_from_idx(struct wilc *wilc, int idx)
 	if (index < 0 || index >= WILC_NUM_CONCURRENT_IFC)
 		return NULL;
 
-	wilc_for_each_vif(wilc, vif) {
+	list_for_each_entry_rcu(vif, &wilc->vif_list, list) {
 		if (vif->idx == index)
 			return vif;
 	}
@@ -377,28 +377,17 @@ struct wilc_join_bss_param *
 wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 			  struct cfg80211_crypto_settings *crypto)
 {
-	const u8 *ies_data, *tim_elm, *ssid_elm, *rates_ie, *supp_rates_ie;
-	const u8 *ht_ie, *wpa_ie, *wmm_ie, *rsn_ie;
-	struct ieee80211_p2p_noa_attr noa_attr;
-	const struct cfg80211_bss_ies *ies;
 	struct wilc_join_bss_param *param;
-	u8 rates_len = 0, ies_len;
+	struct ieee80211_p2p_noa_attr noa_attr;
+	u8 rates_len = 0;
+	const u8 *tim_elm, *ssid_elm, *rates_ie, *supp_rates_ie;
+	const u8 *ht_ie, *wpa_ie, *wmm_ie, *rsn_ie;
 	int ret;
+	const struct cfg80211_bss_ies *ies = rcu_dereference(bss->ies);
 
 	param = kzalloc(sizeof(*param), GFP_KERNEL);
 	if (!param)
 		return NULL;
-
-	rcu_read_lock();
-	ies = rcu_dereference(bss->ies);
-	ies_data = kmemdup(ies->data, ies->len, GFP_ATOMIC);
-	if (!ies_data) {
-		rcu_read_unlock();
-		kfree(param);
-		return NULL;
-	}
-	ies_len = ies->len;
-	rcu_read_unlock();
 
 	param->beacon_period = cpu_to_le16(bss->beacon_interval);
 	param->cap_info = cpu_to_le16(bss->capability);
@@ -406,20 +395,20 @@ wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 	param->ch = ieee80211_frequency_to_channel(bss->channel->center_freq);
 	ether_addr_copy(param->bssid, bss->bssid);
 
-	ssid_elm = cfg80211_find_ie(WLAN_EID_SSID, ies_data, ies_len);
+	ssid_elm = cfg80211_find_ie(WLAN_EID_SSID, ies->data, ies->len);
 	if (ssid_elm) {
 		if (ssid_elm[1] <= IEEE80211_MAX_SSID_LEN)
 			memcpy(param->ssid, ssid_elm + 2, ssid_elm[1]);
 	}
 
-	tim_elm = cfg80211_find_ie(WLAN_EID_TIM, ies_data, ies_len);
+	tim_elm = cfg80211_find_ie(WLAN_EID_TIM, ies->data, ies->len);
 	if (tim_elm && tim_elm[1] >= 2)
 		param->dtim_period = tim_elm[3];
 
 	memset(param->p_suites, 0xFF, 3);
 	memset(param->akm_suites, 0xFF, 3);
 
-	rates_ie = cfg80211_find_ie(WLAN_EID_SUPP_RATES, ies_data, ies_len);
+	rates_ie = cfg80211_find_ie(WLAN_EID_SUPP_RATES, ies->data, ies->len);
 	if (rates_ie) {
 		rates_len = rates_ie[1];
 		if (rates_len > WILC_MAX_RATES_SUPPORTED)
@@ -430,7 +419,7 @@ wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 
 	if (rates_len < WILC_MAX_RATES_SUPPORTED) {
 		supp_rates_ie = cfg80211_find_ie(WLAN_EID_EXT_SUPP_RATES,
-						 ies_data, ies_len);
+						 ies->data, ies->len);
 		if (supp_rates_ie) {
 			u8 ext_rates = supp_rates_ie[1];
 
@@ -445,11 +434,11 @@ wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 		}
 	}
 
-	ht_ie = cfg80211_find_ie(WLAN_EID_HT_CAPABILITY, ies_data, ies_len);
+	ht_ie = cfg80211_find_ie(WLAN_EID_HT_CAPABILITY, ies->data, ies->len);
 	if (ht_ie)
 		param->ht_capable = true;
 
-	ret = cfg80211_get_p2p_attr(ies_data, ies_len,
+	ret = cfg80211_get_p2p_attr(ies->data, ies->len,
 				    IEEE80211_P2P_ATTR_ABSENCE_NOTICE,
 				    (u8 *)&noa_attr, sizeof(noa_attr));
 	if (ret > 0) {
@@ -473,7 +462,7 @@ wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 	}
 	wmm_ie = cfg80211_find_vendor_ie(WLAN_OUI_MICROSOFT,
 					 WLAN_OUI_TYPE_MICROSOFT_WMM,
-					 ies_data, ies_len);
+					 ies->data, ies->len);
 	if (wmm_ie) {
 		struct ieee80211_wmm_param_ie *ie;
 
@@ -488,13 +477,13 @@ wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 
 	wpa_ie = cfg80211_find_vendor_ie(WLAN_OUI_MICROSOFT,
 					 WLAN_OUI_TYPE_MICROSOFT_WPA,
-					 ies_data, ies_len);
+					 ies->data, ies->len);
 	if (wpa_ie) {
 		param->mode_802_11i = 1;
 		param->rsn_found = true;
 	}
 
-	rsn_ie = cfg80211_find_ie(WLAN_EID_RSN, ies_data, ies_len);
+	rsn_ie = cfg80211_find_ie(WLAN_EID_RSN, ies->data, ies->len);
 	if (rsn_ie) {
 		int rsn_ie_len = sizeof(struct element) + rsn_ie[1];
 		int offset = 8;
@@ -528,7 +517,6 @@ wilc_parse_join_bss_param(struct cfg80211_bss *bss,
 			param->akm_suites[i] = crypto->akm_suites[i] & 0xFF;
 	}
 
-	kfree(ies_data);
 	return (void *)param;
 }
 
@@ -1567,28 +1555,26 @@ int wilc_deinit(struct wilc_vif *vif)
 
 void wilc_network_info_received(struct wilc *wilc, u8 *buffer, u32 length)
 {
-	struct host_if_drv *hif_drv;
-	struct host_if_msg *msg;
-	struct wilc_vif *vif;
-	int srcu_idx;
 	int result;
+	struct host_if_msg *msg;
 	int id;
+	struct host_if_drv *hif_drv;
+	struct wilc_vif *vif;
 
 	id = get_unaligned_le32(&buffer[length - 4]);
-	srcu_idx = srcu_read_lock(&wilc->srcu);
 	vif = wilc_get_vif_from_idx(wilc, id);
 	if (!vif)
-		goto out;
-
+		return;
 	hif_drv = vif->hif_drv;
+
 	if (!hif_drv) {
 		netdev_err(vif->ndev, "driver not init[%p]\n", hif_drv);
-		goto out;
+		return;
 	}
 
 	msg = wilc_alloc_work(vif, handle_rcvd_ntwrk_info, false);
 	if (IS_ERR(msg))
-		goto out;
+		return;
 
 	msg->body.net_info.frame_len = get_unaligned_le16(&buffer[6]) - 1;
 	msg->body.net_info.rssi = buffer[8];
@@ -1597,7 +1583,7 @@ void wilc_network_info_received(struct wilc *wilc, u8 *buffer, u32 length)
 					  GFP_KERNEL);
 	if (!msg->body.net_info.mgmt) {
 		kfree(msg);
-		goto out;
+		return;
 	}
 
 	result = wilc_enqueue_work(msg);
@@ -1606,41 +1592,43 @@ void wilc_network_info_received(struct wilc *wilc, u8 *buffer, u32 length)
 		kfree(msg->body.net_info.mgmt);
 		kfree(msg);
 	}
-out:
-	srcu_read_unlock(&wilc->srcu, srcu_idx);
 }
 
 void wilc_gnrl_async_info_received(struct wilc *wilc, u8 *buffer, u32 length)
 {
-	struct host_if_drv *hif_drv;
-	struct host_if_msg *msg;
-	struct wilc_vif *vif;
-	int srcu_idx;
 	int result;
+	struct host_if_msg *msg;
 	int id;
+	struct host_if_drv *hif_drv;
+	struct wilc_vif *vif;
 
 	mutex_lock(&wilc->deinit_lock);
 
 	id = get_unaligned_le32(&buffer[length - 4]);
-	srcu_idx = srcu_read_lock(&wilc->srcu);
 	vif = wilc_get_vif_from_idx(wilc, id);
-	if (!vif)
-		goto out;
+	if (!vif) {
+		mutex_unlock(&wilc->deinit_lock);
+		return;
+	}
 
 	hif_drv = vif->hif_drv;
 
 	if (!hif_drv) {
-		goto out;
+		mutex_unlock(&wilc->deinit_lock);
+		return;
 	}
 
 	if (!hif_drv->conn_info.conn_result) {
 		netdev_err(vif->ndev, "%s: conn_result is NULL\n", __func__);
-		goto out;
+		mutex_unlock(&wilc->deinit_lock);
+		return;
 	}
 
 	msg = wilc_alloc_work(vif, handle_rcvd_gnrl_async_info, false);
-	if (IS_ERR(msg))
-		goto out;
+	if (IS_ERR(msg)) {
+		mutex_unlock(&wilc->deinit_lock);
+		return;
+	}
 
 	msg->body.mac_info.status = buffer[7];
 	result = wilc_enqueue_work(msg);
@@ -1648,36 +1636,32 @@ void wilc_gnrl_async_info_received(struct wilc *wilc, u8 *buffer, u32 length)
 		netdev_err(vif->ndev, "%s: enqueue work failed\n", __func__);
 		kfree(msg);
 	}
-out:
-	srcu_read_unlock(&wilc->srcu, srcu_idx);
+
 	mutex_unlock(&wilc->deinit_lock);
 }
 
 void wilc_scan_complete_received(struct wilc *wilc, u8 *buffer, u32 length)
 {
-	struct host_if_drv *hif_drv;
-	struct wilc_vif *vif;
-	int srcu_idx;
 	int result;
 	int id;
+	struct host_if_drv *hif_drv;
+	struct wilc_vif *vif;
 
 	id = get_unaligned_le32(&buffer[length - 4]);
-	srcu_idx = srcu_read_lock(&wilc->srcu);
 	vif = wilc_get_vif_from_idx(wilc, id);
 	if (!vif)
-		goto out;
-
+		return;
 	hif_drv = vif->hif_drv;
-	if (!hif_drv) {
-		goto out;
-	}
+
+	if (!hif_drv)
+		return;
 
 	if (hif_drv->usr_scan_req.scan_result) {
 		struct host_if_msg *msg;
 
 		msg = wilc_alloc_work(vif, handle_scan_complete, false);
 		if (IS_ERR(msg))
-			goto out;
+			return;
 
 		result = wilc_enqueue_work(msg);
 		if (result) {
@@ -1686,8 +1670,6 @@ void wilc_scan_complete_received(struct wilc *wilc, u8 *buffer, u32 length)
 			kfree(msg);
 		}
 	}
-out:
-	srcu_read_unlock(&wilc->srcu, srcu_idx);
 }
 
 int wilc_remain_on_channel(struct wilc_vif *vif, u64 cookie, u16 chan,

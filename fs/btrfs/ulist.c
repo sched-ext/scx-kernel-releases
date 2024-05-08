@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include "messages.h"
 #include "ulist.h"
+#include "ctree.h"
 
 /*
  * ulist is a generic data structure to hold a collection of unique u64

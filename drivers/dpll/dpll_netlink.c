@@ -8,7 +8,6 @@
  */
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/netdevice.h>
 #include <net/genetlink.h>
 #include "dpll_core.h"
 #include "dpll_netlink.h"
@@ -49,6 +48,18 @@ dpll_msg_add_dev_parent_handle(struct sk_buff *msg, u32 id)
 }
 
 /**
+ * dpll_msg_pin_handle_size - get size of pin handle attribute for given pin
+ * @pin: pin pointer
+ *
+ * Return: byte size of pin handle attribute for given pin.
+ */
+size_t dpll_msg_pin_handle_size(struct dpll_pin *pin)
+{
+	return pin ? nla_total_size(4) : 0; /* DPLL_A_PIN_ID */
+}
+EXPORT_SYMBOL_GPL(dpll_msg_pin_handle_size);
+
+/**
  * dpll_msg_add_pin_handle - attach pin handle attribute to a given message
  * @msg: pointer to sk_buff message to attach a pin handle
  * @pin: pin pointer
@@ -57,7 +68,7 @@ dpll_msg_add_dev_parent_handle(struct sk_buff *msg, u32 id)
  * * 0 - success
  * * -EMSGSIZE - no space in message to attach pin handle
  */
-static int dpll_msg_add_pin_handle(struct sk_buff *msg, struct dpll_pin *pin)
+int dpll_msg_add_pin_handle(struct sk_buff *msg, struct dpll_pin *pin)
 {
 	if (!pin)
 		return 0;
@@ -65,28 +76,7 @@ static int dpll_msg_add_pin_handle(struct sk_buff *msg, struct dpll_pin *pin)
 		return -EMSGSIZE;
 	return 0;
 }
-
-static struct dpll_pin *dpll_netdev_pin(const struct net_device *dev)
-{
-	return rcu_dereference_rtnl(dev->dpll_pin);
-}
-
-/**
- * dpll_netdev_pin_handle_size - get size of pin handle attribute of a netdev
- * @dev: netdev from which to get the pin
- *
- * Return: byte size of pin handle attribute, or 0 if @dev has no pin.
- */
-size_t dpll_netdev_pin_handle_size(const struct net_device *dev)
-{
-	return dpll_netdev_pin(dev) ? nla_total_size(4) : 0; /* DPLL_A_PIN_ID */
-}
-
-int dpll_netdev_add_pin_handle(struct sk_buff *msg,
-			       const struct net_device *dev)
-{
-	return dpll_msg_add_pin_handle(msg, dpll_netdev_pin(dev));
-}
+EXPORT_SYMBOL_GPL(dpll_msg_add_pin_handle);
 
 static int
 dpll_msg_add_mode(struct sk_buff *msg, struct dpll_device *dpll,
@@ -131,20 +121,13 @@ dpll_msg_add_lock_status(struct sk_buff *msg, struct dpll_device *dpll,
 			 struct netlink_ext_ack *extack)
 {
 	const struct dpll_device_ops *ops = dpll_device_ops(dpll);
-	enum dpll_lock_status_error status_error = 0;
 	enum dpll_lock_status status;
 	int ret;
 
-	ret = ops->lock_status_get(dpll, dpll_priv(dpll), &status,
-				   &status_error, extack);
+	ret = ops->lock_status_get(dpll, dpll_priv(dpll), &status, extack);
 	if (ret)
 		return ret;
 	if (nla_put_u32(msg, DPLL_A_LOCK_STATUS, status))
-		return -EMSGSIZE;
-	if (status_error &&
-	    (status == DPLL_LOCK_STATUS_UNLOCKED ||
-	     status == DPLL_LOCK_STATUS_HOLDOVER) &&
-	    nla_put_u32(msg, DPLL_A_LOCK_STATUS_ERROR, status_error))
 		return -EMSGSIZE;
 
 	return 0;
@@ -1216,7 +1199,6 @@ int dpll_nl_pin_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	unsigned long i;
 	int ret = 0;
 
-	mutex_lock(&dpll_lock);
 	xa_for_each_marked_start(&dpll_pin_xa, i, pin, DPLL_REGISTERED,
 				 ctx->idx) {
 		if (!dpll_pin_available(pin))
@@ -1236,8 +1218,6 @@ int dpll_nl_pin_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 		}
 		genlmsg_end(skb, hdr);
 	}
-	mutex_unlock(&dpll_lock);
-
 	if (ret == -EMSGSIZE) {
 		ctx->idx = i;
 		return skb->len;
@@ -1393,7 +1373,6 @@ int dpll_nl_device_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	unsigned long i;
 	int ret = 0;
 
-	mutex_lock(&dpll_lock);
 	xa_for_each_marked_start(&dpll_device_xa, i, dpll, DPLL_REGISTERED,
 				 ctx->idx) {
 		hdr = genlmsg_put(skb, NETLINK_CB(cb->skb).portid,
@@ -1410,8 +1389,6 @@ int dpll_nl_device_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 		}
 		genlmsg_end(skb, hdr);
 	}
-	mutex_unlock(&dpll_lock);
-
 	if (ret == -EMSGSIZE) {
 		ctx->idx = i;
 		return skb->len;
@@ -1460,6 +1437,20 @@ dpll_unlock_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
 		 struct genl_info *info)
 {
 	mutex_unlock(&dpll_lock);
+}
+
+int dpll_lock_dumpit(struct netlink_callback *cb)
+{
+	mutex_lock(&dpll_lock);
+
+	return 0;
+}
+
+int dpll_unlock_dumpit(struct netlink_callback *cb)
+{
+	mutex_unlock(&dpll_lock);
+
+	return 0;
 }
 
 int dpll_pin_pre_doit(const struct genl_split_ops *ops, struct sk_buff *skb,

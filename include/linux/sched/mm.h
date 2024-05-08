@@ -236,24 +236,15 @@ static inline gfp_t current_gfp_context(gfp_t flags)
 {
 	unsigned int pflags = READ_ONCE(current->flags);
 
-	if (unlikely(pflags & (PF_MEMALLOC_NOIO |
-			       PF_MEMALLOC_NOFS |
-			       PF_MEMALLOC_NORECLAIM |
-			       PF_MEMALLOC_NOWARN |
-			       PF_MEMALLOC_PIN))) {
+	if (unlikely(pflags & (PF_MEMALLOC_NOIO | PF_MEMALLOC_NOFS | PF_MEMALLOC_PIN))) {
 		/*
-		 * Stronger flags before weaker flags:
-		 * NORECLAIM implies NOIO, which in turn implies NOFS
+		 * NOIO implies both NOIO and NOFS and it is a weaker context
+		 * so always make sure it makes precedence
 		 */
-		if (pflags & PF_MEMALLOC_NORECLAIM)
-			flags &= ~__GFP_DIRECT_RECLAIM;
-		else if (pflags & PF_MEMALLOC_NOIO)
+		if (pflags & PF_MEMALLOC_NOIO)
 			flags &= ~(__GFP_IO | __GFP_FS);
 		else if (pflags & PF_MEMALLOC_NOFS)
 			flags &= ~__GFP_FS;
-
-		if (pflags & PF_MEMALLOC_NOWARN)
-			flags |= __GFP_NOWARN;
 
 		if (pflags & PF_MEMALLOC_PIN)
 			flags &= ~__GFP_MOVABLE;
@@ -316,24 +307,6 @@ static inline void might_alloc(gfp_t gfp_mask)
 }
 
 /**
- * memalloc_flags_save - Add a PF_* flag to current->flags, save old value
- *
- * This allows PF_* flags to be conveniently added, irrespective of current
- * value, and then the old version restored with memalloc_flags_restore().
- */
-static inline unsigned memalloc_flags_save(unsigned flags)
-{
-	unsigned oldflags = ~current->flags & flags;
-	current->flags |= flags;
-	return oldflags;
-}
-
-static inline void memalloc_flags_restore(unsigned flags)
-{
-	current->flags &= ~flags;
-}
-
-/**
  * memalloc_noio_save - Marks implicit GFP_NOIO allocation scope.
  *
  * This functions marks the beginning of the GFP_NOIO allocation scope.
@@ -342,12 +315,13 @@ static inline void memalloc_flags_restore(unsigned flags)
  * point of view. Use memalloc_noio_restore to end the scope with flags
  * returned by this function.
  *
- * Context: This function is safe to be used from any context.
- * Return: The saved flags to be passed to memalloc_noio_restore.
+ * This function is safe to be used from any context.
  */
 static inline unsigned int memalloc_noio_save(void)
 {
-	return memalloc_flags_save(PF_MEMALLOC_NOIO);
+	unsigned int flags = current->flags & PF_MEMALLOC_NOIO;
+	current->flags |= PF_MEMALLOC_NOIO;
+	return flags;
 }
 
 /**
@@ -360,7 +334,7 @@ static inline unsigned int memalloc_noio_save(void)
  */
 static inline void memalloc_noio_restore(unsigned int flags)
 {
-	memalloc_flags_restore(flags);
+	current->flags = (current->flags & ~PF_MEMALLOC_NOIO) | flags;
 }
 
 /**
@@ -372,12 +346,13 @@ static inline void memalloc_noio_restore(unsigned int flags)
  * point of view. Use memalloc_nofs_restore to end the scope with flags
  * returned by this function.
  *
- * Context: This function is safe to be used from any context.
- * Return: The saved flags to be passed to memalloc_nofs_restore.
+ * This function is safe to be used from any context.
  */
 static inline unsigned int memalloc_nofs_save(void)
 {
-	return memalloc_flags_save(PF_MEMALLOC_NOFS);
+	unsigned int flags = current->flags & PF_MEMALLOC_NOFS;
+	current->flags |= PF_MEMALLOC_NOFS;
+	return flags;
 }
 
 /**
@@ -390,76 +365,32 @@ static inline unsigned int memalloc_nofs_save(void)
  */
 static inline void memalloc_nofs_restore(unsigned int flags)
 {
-	memalloc_flags_restore(flags);
+	current->flags = (current->flags & ~PF_MEMALLOC_NOFS) | flags;
 }
 
-/**
- * memalloc_noreclaim_save - Marks implicit __GFP_MEMALLOC scope.
- *
- * This function marks the beginning of the __GFP_MEMALLOC allocation scope.
- * All further allocations will implicitly add the __GFP_MEMALLOC flag, which
- * prevents entering reclaim and allows access to all memory reserves. This
- * should only be used when the caller guarantees the allocation will allow more
- * memory to be freed very shortly, i.e. it needs to allocate some memory in
- * the process of freeing memory, and cannot reclaim due to potential recursion.
- *
- * Users of this scope have to be extremely careful to not deplete the reserves
- * completely and implement a throttling mechanism which controls the
- * consumption of the reserve based on the amount of freed memory. Usage of a
- * pre-allocated pool (e.g. mempool) should be always considered before using
- * this scope.
- *
- * Individual allocations under the scope can opt out using __GFP_NOMEMALLOC
- *
- * Context: This function should not be used in an interrupt context as that one
- *          does not give PF_MEMALLOC access to reserves.
- *          See __gfp_pfmemalloc_flags().
- * Return: The saved flags to be passed to memalloc_noreclaim_restore.
- */
 static inline unsigned int memalloc_noreclaim_save(void)
 {
-	return memalloc_flags_save(PF_MEMALLOC);
+	unsigned int flags = current->flags & PF_MEMALLOC;
+	current->flags |= PF_MEMALLOC;
+	return flags;
 }
 
-/**
- * memalloc_noreclaim_restore - Ends the implicit __GFP_MEMALLOC scope.
- * @flags: Flags to restore.
- *
- * Ends the implicit __GFP_MEMALLOC scope started by memalloc_noreclaim_save
- * function. Always make sure that the given flags is the return value from the
- * pairing memalloc_noreclaim_save call.
- */
 static inline void memalloc_noreclaim_restore(unsigned int flags)
 {
-	memalloc_flags_restore(flags);
+	current->flags = (current->flags & ~PF_MEMALLOC) | flags;
 }
 
-/**
- * memalloc_pin_save - Marks implicit ~__GFP_MOVABLE scope.
- *
- * This function marks the beginning of the ~__GFP_MOVABLE allocation scope.
- * All further allocations will implicitly remove the __GFP_MOVABLE flag, which
- * will constraint the allocations to zones that allow long term pinning, i.e.
- * not ZONE_MOVABLE zones.
- *
- * Return: The saved flags to be passed to memalloc_pin_restore.
- */
 static inline unsigned int memalloc_pin_save(void)
 {
-	return memalloc_flags_save(PF_MEMALLOC_PIN);
+	unsigned int flags = current->flags & PF_MEMALLOC_PIN;
+
+	current->flags |= PF_MEMALLOC_PIN;
+	return flags;
 }
 
-/**
- * memalloc_pin_restore - Ends the implicit ~__GFP_MOVABLE scope.
- * @flags: Flags to restore.
- *
- * Ends the implicit ~__GFP_MOVABLE scope started by memalloc_pin_save function.
- * Always make sure that the given flags is the return value from the pairing
- * memalloc_pin_save call.
- */
 static inline void memalloc_pin_restore(unsigned int flags)
 {
-	memalloc_flags_restore(flags);
+	current->flags = (current->flags & ~PF_MEMALLOC_PIN) | flags;
 }
 
 #ifdef CONFIG_MEMCG

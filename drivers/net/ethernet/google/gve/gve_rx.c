@@ -23,9 +23,7 @@ static void gve_rx_free_buffer(struct device *dev,
 	gve_free_page(dev, page_info->page, dma, DMA_FROM_DEVICE);
 }
 
-static void gve_rx_unfill_pages(struct gve_priv *priv,
-				struct gve_rx_ring *rx,
-				struct gve_rx_alloc_rings_cfg *cfg)
+static void gve_rx_unfill_pages(struct gve_priv *priv, struct gve_rx_ring *rx)
 {
 	u32 slots = rx->mask + 1;
 	int i;
@@ -38,7 +36,7 @@ static void gve_rx_unfill_pages(struct gve_priv *priv,
 		for (i = 0; i < slots; i++)
 			page_ref_sub(rx->data.page_info[i].page,
 				     rx->data.page_info[i].pagecnt_bias - 1);
-		gve_unassign_qpl(cfg->qpl_cfg, rx->data.qpl->id);
+		gve_unassign_qpl(priv, rx->data.qpl->id);
 		rx->data.qpl = NULL;
 
 		for (i = 0; i < rx->qpl_copy_pool_mask + 1; i++) {
@@ -51,26 +49,16 @@ static void gve_rx_unfill_pages(struct gve_priv *priv,
 	rx->data.page_info = NULL;
 }
 
-void gve_rx_stop_ring_gqi(struct gve_priv *priv, int idx)
+static void gve_rx_free_ring(struct gve_priv *priv, int idx)
 {
-	int ntfy_idx = gve_rx_idx_to_ntfy(priv, idx);
-
-	if (!gve_rx_was_added_to_block(priv, idx))
-		return;
-
-	gve_remove_napi(priv, ntfy_idx);
-	gve_rx_remove_from_block(priv, idx);
-}
-
-static void gve_rx_free_ring_gqi(struct gve_priv *priv, struct gve_rx_ring *rx,
-				 struct gve_rx_alloc_rings_cfg *cfg)
-{
+	struct gve_rx_ring *rx = &priv->rx[idx];
 	struct device *dev = &priv->pdev->dev;
 	u32 slots = rx->mask + 1;
-	int idx = rx->q_num;
 	size_t bytes;
 
-	bytes = sizeof(struct gve_rx_desc) * cfg->ring_size;
+	gve_rx_remove_from_block(priv, idx);
+
+	bytes = sizeof(struct gve_rx_desc) * priv->rx_desc_cnt;
 	dma_free_coherent(dev, bytes, rx->desc.desc_ring, rx->desc.bus);
 	rx->desc.desc_ring = NULL;
 
@@ -78,7 +66,7 @@ static void gve_rx_free_ring_gqi(struct gve_priv *priv, struct gve_rx_ring *rx,
 			  rx->q_resources, rx->q_resources_bus);
 	rx->q_resources = NULL;
 
-	gve_rx_unfill_pages(priv, rx, cfg);
+	gve_rx_unfill_pages(priv, rx);
 
 	bytes = sizeof(*rx->data.data_ring) * slots;
 	dma_free_coherent(dev, bytes, rx->data.data_ring,
@@ -105,8 +93,7 @@ static void gve_setup_rx_buffer(struct gve_rx_slot_page_info *page_info,
 
 static int gve_rx_alloc_buffer(struct gve_priv *priv, struct device *dev,
 			       struct gve_rx_slot_page_info *page_info,
-			       union gve_rx_data_slot *data_slot,
-			       struct gve_rx_ring *rx)
+			       union gve_rx_data_slot *data_slot)
 {
 	struct page *page;
 	dma_addr_t dma;
@@ -114,19 +101,14 @@ static int gve_rx_alloc_buffer(struct gve_priv *priv, struct device *dev,
 
 	err = gve_alloc_page(priv, dev, &page, &dma, DMA_FROM_DEVICE,
 			     GFP_ATOMIC);
-	if (err) {
-		u64_stats_update_begin(&rx->statss);
-		rx->rx_buf_alloc_fail++;
-		u64_stats_update_end(&rx->statss);
+	if (err)
 		return err;
-	}
 
 	gve_setup_rx_buffer(page_info, dma, page, &data_slot->addr);
 	return 0;
 }
 
-static int gve_rx_prefill_pages(struct gve_rx_ring *rx,
-				struct gve_rx_alloc_rings_cfg *cfg)
+static int gve_prefill_rx_pages(struct gve_rx_ring *rx)
 {
 	struct gve_priv *priv = rx->gve;
 	u32 slots;
@@ -145,7 +127,7 @@ static int gve_rx_prefill_pages(struct gve_rx_ring *rx,
 		return -ENOMEM;
 
 	if (!rx->data.raw_addressing) {
-		rx->data.qpl = gve_assign_rx_qpl(cfg, rx->q_num);
+		rx->data.qpl = gve_assign_rx_qpl(priv, rx->q_num);
 		if (!rx->data.qpl) {
 			kvfree(rx->data.page_info);
 			rx->data.page_info = NULL;
@@ -161,9 +143,8 @@ static int gve_rx_prefill_pages(struct gve_rx_ring *rx,
 					    &rx->data.data_ring[i].qpl_offset);
 			continue;
 		}
-		err = gve_rx_alloc_buffer(priv, &priv->pdev->dev,
-					  &rx->data.page_info[i],
-					  &rx->data.data_ring[i], rx);
+		err = gve_rx_alloc_buffer(priv, &priv->pdev->dev, &rx->data.page_info[i],
+					  &rx->data.data_ring[i]);
 		if (err)
 			goto alloc_err_rda;
 	}
@@ -204,7 +185,7 @@ alloc_err_qpl:
 		page_ref_sub(rx->data.page_info[i].page,
 			     rx->data.page_info[i].pagecnt_bias - 1);
 
-	gve_unassign_qpl(cfg->qpl_cfg, rx->data.qpl->id);
+	gve_unassign_qpl(priv, rx->data.qpl->id);
 	rx->data.qpl = NULL;
 
 	return err;
@@ -226,23 +207,13 @@ static void gve_rx_ctx_clear(struct gve_rx_ctx *ctx)
 	ctx->drop_pkt = false;
 }
 
-void gve_rx_start_ring_gqi(struct gve_priv *priv, int idx)
+static int gve_rx_alloc_ring(struct gve_priv *priv, int idx)
 {
-	int ntfy_idx = gve_rx_idx_to_ntfy(priv, idx);
-
-	gve_rx_add_to_block(priv, idx);
-	gve_add_napi(priv, ntfy_idx, gve_napi_poll);
-}
-
-static int gve_rx_alloc_ring_gqi(struct gve_priv *priv,
-				 struct gve_rx_alloc_rings_cfg *cfg,
-				 struct gve_rx_ring *rx,
-				 int idx)
-{
+	struct gve_rx_ring *rx = &priv->rx[idx];
 	struct device *hdev = &priv->pdev->dev;
-	u32 slots = priv->rx_data_slot_cnt;
 	int filled_pages;
 	size_t bytes;
+	u32 slots;
 	int err;
 
 	netif_dbg(priv, drv, priv->dev, "allocating rx ring\n");
@@ -252,8 +223,9 @@ static int gve_rx_alloc_ring_gqi(struct gve_priv *priv,
 	rx->gve = priv;
 	rx->q_num = idx;
 
+	slots = priv->rx_data_slot_cnt;
 	rx->mask = slots - 1;
-	rx->data.raw_addressing = cfg->raw_addressing;
+	rx->data.raw_addressing = priv->queue_format == GVE_GQI_RDA_FORMAT;
 
 	/* alloc rx data ring */
 	bytes = sizeof(*rx->data.data_ring) * slots;
@@ -274,7 +246,7 @@ static int gve_rx_alloc_ring_gqi(struct gve_priv *priv,
 		goto abort_with_slots;
 	}
 
-	filled_pages = gve_rx_prefill_pages(rx, cfg);
+	filled_pages = gve_prefill_rx_pages(rx);
 	if (filled_pages < 0) {
 		err = -ENOMEM;
 		goto abort_with_copy_pool;
@@ -297,7 +269,7 @@ static int gve_rx_alloc_ring_gqi(struct gve_priv *priv,
 		  (unsigned long)rx->data.data_bus);
 
 	/* alloc rx desc ring */
-	bytes = sizeof(struct gve_rx_desc) * cfg->ring_size;
+	bytes = sizeof(struct gve_rx_desc) * priv->rx_desc_cnt;
 	rx->desc.desc_ring = dma_alloc_coherent(hdev, bytes, &rx->desc.bus,
 						GFP_KERNEL);
 	if (!rx->desc.desc_ring) {
@@ -305,11 +277,15 @@ static int gve_rx_alloc_ring_gqi(struct gve_priv *priv,
 		goto abort_with_q_resources;
 	}
 	rx->cnt = 0;
-	rx->db_threshold = slots / 2;
+	rx->db_threshold = priv->rx_desc_cnt / 2;
 	rx->desc.seqno = 1;
 
+	/* Allocating half-page buffers allows page-flipping which is faster
+	 * than copying or allocating new pages.
+	 */
 	rx->packet_buffer_size = GVE_DEFAULT_RX_BUFFER_SIZE;
 	gve_rx_ctx_clear(&rx->ctx);
+	gve_rx_add_to_block(priv, idx);
 
 	return 0;
 
@@ -318,7 +294,7 @@ abort_with_q_resources:
 			  rx->q_resources, rx->q_resources_bus);
 	rx->q_resources = NULL;
 abort_filled:
-	gve_rx_unfill_pages(priv, rx, cfg);
+	gve_rx_unfill_pages(priv, rx);
 abort_with_copy_pool:
 	kvfree(rx->qpl_copy_pool);
 	rx->qpl_copy_pool = NULL;
@@ -330,58 +306,36 @@ abort_with_slots:
 	return err;
 }
 
-int gve_rx_alloc_rings_gqi(struct gve_priv *priv,
-			   struct gve_rx_alloc_rings_cfg *cfg)
+int gve_rx_alloc_rings(struct gve_priv *priv)
 {
-	struct gve_rx_ring *rx;
 	int err = 0;
-	int i, j;
+	int i;
 
-	if (!cfg->raw_addressing && !cfg->qpls) {
-		netif_err(priv, drv, priv->dev,
-			  "Cannot alloc QPL ring before allocing QPLs\n");
-		return -EINVAL;
-	}
-
-	rx = kvcalloc(cfg->qcfg->max_queues, sizeof(struct gve_rx_ring),
-		      GFP_KERNEL);
-	if (!rx)
-		return -ENOMEM;
-
-	for (i = 0; i < cfg->qcfg->num_queues; i++) {
-		err = gve_rx_alloc_ring_gqi(priv, cfg, &rx[i], i);
+	for (i = 0; i < priv->rx_cfg.num_queues; i++) {
+		err = gve_rx_alloc_ring(priv, i);
 		if (err) {
 			netif_err(priv, drv, priv->dev,
 				  "Failed to alloc rx ring=%d: err=%d\n",
 				  i, err);
-			goto cleanup;
+			break;
 		}
 	}
+	/* Unallocate if there was an error */
+	if (err) {
+		int j;
 
-	cfg->rx = rx;
-	return 0;
-
-cleanup:
-	for (j = 0; j < i; j++)
-		gve_rx_free_ring_gqi(priv, &rx[j], cfg);
-	kvfree(rx);
+		for (j = 0; j < i; j++)
+			gve_rx_free_ring(priv, j);
+	}
 	return err;
 }
 
-void gve_rx_free_rings_gqi(struct gve_priv *priv,
-			   struct gve_rx_alloc_rings_cfg *cfg)
+void gve_rx_free_rings_gqi(struct gve_priv *priv)
 {
-	struct gve_rx_ring *rx = cfg->rx;
 	int i;
 
-	if (!rx)
-		return;
-
-	for (i = 0; i < cfg->qcfg->num_queues;  i++)
-		gve_rx_free_ring_gqi(priv, &rx[i], cfg);
-
-	kvfree(rx);
-	cfg->rx = NULL;
+	for (i = 0; i < priv->rx_cfg.num_queues; i++)
+		gve_rx_free_ring(priv, i);
 }
 
 void gve_rx_write_doorbell(struct gve_priv *priv, struct gve_rx_ring *rx)
@@ -402,7 +356,7 @@ static enum pkt_hash_types gve_rss_type(__be16 pkt_flags)
 
 static struct sk_buff *gve_rx_add_frags(struct napi_struct *napi,
 					struct gve_rx_slot_page_info *page_info,
-					unsigned int truesize, u16 len,
+					u16 packet_buffer_size, u16 len,
 					struct gve_rx_ctx *ctx)
 {
 	u32 offset = page_info->page_offset + page_info->pad;
@@ -435,10 +389,10 @@ static struct sk_buff *gve_rx_add_frags(struct napi_struct *napi,
 	if (skb != ctx->skb_head) {
 		ctx->skb_head->len += len;
 		ctx->skb_head->data_len += len;
-		ctx->skb_head->truesize += truesize;
+		ctx->skb_head->truesize += packet_buffer_size;
 	}
 	skb_add_rx_frag(skb, num_frags, page_info->page,
-			offset, len, truesize);
+			offset, len, packet_buffer_size);
 
 	return ctx->skb_head;
 }
@@ -532,7 +486,7 @@ static struct sk_buff *gve_rx_copy_to_pool(struct gve_rx_ring *rx,
 
 		memcpy(alloc_page_info.page_address, src, page_info->pad + len);
 		skb = gve_rx_add_frags(napi, &alloc_page_info,
-				       PAGE_SIZE,
+				       rx->packet_buffer_size,
 				       len, ctx);
 
 		u64_stats_update_begin(&rx->statss);
@@ -942,7 +896,10 @@ static bool gve_rx_refill_buffers(struct gve_priv *priv, struct gve_rx_ring *rx)
 				gve_rx_free_buffer(dev, page_info, data_slot);
 				page_info->page = NULL;
 				if (gve_rx_alloc_buffer(priv, dev, page_info,
-							data_slot, rx)) {
+							data_slot)) {
+					u64_stats_update_begin(&rx->statss);
+					rx->rx_buf_alloc_fail++;
+					u64_stats_update_end(&rx->statss);
 					break;
 				}
 			}

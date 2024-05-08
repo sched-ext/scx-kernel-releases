@@ -709,11 +709,10 @@ static irqreturn_t nvec_interrupt(int irq, void *dev)
 		status & RNW ? " RNW" : "");
 
 	/*
-	 * TODO: replace the udelay with a read back after each writel above
-	 * in order to work around a hardware issue, see i2c-tegra.c
+	 * TODO: A correct fix needs to be found for this.
 	 *
-	 * Unfortunately, this change causes an intialisation issue with the
-	 * touchpad, which needs to be fixed first.
+	 * We experience less incomplete messages with this delay than without
+	 * it, but we don't know why. Help is appreciated.
 	 */
 	udelay(100);
 

@@ -96,36 +96,36 @@ dump:
 	return -EINVAL;
 }
 
-static int do_readpage(struct folio *folio)
+static int do_readpage(struct page *page)
 {
 	void *addr;
 	int err = 0, i;
 	unsigned int block, beyond;
-	struct ubifs_data_node *dn = NULL;
-	struct inode *inode = folio->mapping->host;
+	struct ubifs_data_node *dn;
+	struct inode *inode = page->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	loff_t i_size = i_size_read(inode);
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld, flags %#lx",
-		inode->i_ino, folio->index, i_size, folio->flags);
-	ubifs_assert(c, !folio_test_checked(folio));
-	ubifs_assert(c, !folio->private);
+		inode->i_ino, page->index, i_size, page->flags);
+	ubifs_assert(c, !PageChecked(page));
+	ubifs_assert(c, !PagePrivate(page));
 
-	addr = kmap_local_folio(folio, 0);
+	addr = kmap(page);
 
-	block = folio->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
+	block = page->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
 	beyond = (i_size + UBIFS_BLOCK_SIZE - 1) >> UBIFS_BLOCK_SHIFT;
 	if (block >= beyond) {
 		/* Reading beyond inode */
-		folio_set_checked(folio);
-		addr = folio_zero_tail(folio, 0, addr);
+		SetPageChecked(page);
+		memset(addr, 0, PAGE_SIZE);
 		goto out;
 	}
 
 	dn = kmalloc(UBIFS_MAX_DATA_NODE_SZ, GFP_NOFS);
 	if (!dn) {
 		err = -ENOMEM;
-		goto out;
+		goto error;
 	}
 
 	i = 0;
@@ -150,35 +150,39 @@ static int do_readpage(struct folio *folio)
 					memset(addr + ilen, 0, dlen - ilen);
 			}
 		}
-		if (++i >= (UBIFS_BLOCKS_PER_PAGE << folio_order(folio)))
+		if (++i >= UBIFS_BLOCKS_PER_PAGE)
 			break;
 		block += 1;
 		addr += UBIFS_BLOCK_SIZE;
-		if (folio_test_highmem(folio) && (offset_in_page(addr) == 0)) {
-			kunmap_local(addr - UBIFS_BLOCK_SIZE);
-			addr = kmap_local_folio(folio, i * UBIFS_BLOCK_SIZE);
-		}
 	}
-
 	if (err) {
 		struct ubifs_info *c = inode->i_sb->s_fs_info;
 		if (err == -ENOENT) {
 			/* Not found, so it must be a hole */
-			folio_set_checked(folio);
+			SetPageChecked(page);
 			dbg_gen("hole");
-			err = 0;
-		} else {
-			ubifs_err(c, "cannot read page %lu of inode %lu, error %d",
-				  folio->index, inode->i_ino, err);
+			goto out_free;
 		}
+		ubifs_err(c, "cannot read page %lu of inode %lu, error %d",
+			  page->index, inode->i_ino, err);
+		goto error;
 	}
 
-out:
+out_free:
 	kfree(dn);
-	if (!err)
-		folio_mark_uptodate(folio);
-	flush_dcache_folio(folio);
-	kunmap_local(addr);
+out:
+	SetPageUptodate(page);
+	ClearPageError(page);
+	flush_dcache_page(page);
+	kunmap(page);
+	return 0;
+
+error:
+	kfree(dn);
+	ClearPageUptodate(page);
+	SetPageError(page);
+	flush_dcache_page(page);
+	kunmap(page);
 	return err;
 }
 
@@ -218,16 +222,16 @@ static int write_begin_slow(struct address_space *mapping,
 	pgoff_t index = pos >> PAGE_SHIFT;
 	struct ubifs_budget_req req = { .new_page = 1 };
 	int err, appending = !!(pos + len > inode->i_size);
-	struct folio *folio;
+	struct page *page;
 
 	dbg_gen("ino %lu, pos %llu, len %u, i_size %lld",
 		inode->i_ino, pos, len, inode->i_size);
 
 	/*
-	 * At the slow path we have to budget before locking the folio, because
-	 * budgeting may force write-back, which would wait on locked folios and
-	 * deadlock if we had the folio locked. At this point we do not know
-	 * anything about the folio, so assume that this is a new folio which is
+	 * At the slow path we have to budget before locking the page, because
+	 * budgeting may force write-back, which would wait on locked pages and
+	 * deadlock if we had the page locked. At this point we do not know
+	 * anything about the page, so assume that this is a new page which is
 	 * written to a hole. This corresponds to largest budget. Later the
 	 * budget will be amended if this is not true.
 	 */
@@ -239,43 +243,45 @@ static int write_begin_slow(struct address_space *mapping,
 	if (unlikely(err))
 		return err;
 
-	folio = __filemap_get_folio(mapping, index, FGP_WRITEBEGIN,
-			mapping_gfp_mask(mapping));
-	if (IS_ERR(folio)) {
+	page = grab_cache_page_write_begin(mapping, index);
+	if (unlikely(!page)) {
 		ubifs_release_budget(c, &req);
-		return PTR_ERR(folio);
+		return -ENOMEM;
 	}
 
-	if (!folio_test_uptodate(folio)) {
-		if (pos == folio_pos(folio) && len >= folio_size(folio))
-			folio_set_checked(folio);
+	if (!PageUptodate(page)) {
+		if (!(pos & ~PAGE_MASK) && len == PAGE_SIZE)
+			SetPageChecked(page);
 		else {
-			err = do_readpage(folio);
+			err = do_readpage(page);
 			if (err) {
-				folio_unlock(folio);
-				folio_put(folio);
+				unlock_page(page);
+				put_page(page);
 				ubifs_release_budget(c, &req);
 				return err;
 			}
 		}
+
+		SetPageUptodate(page);
+		ClearPageError(page);
 	}
 
-	if (folio->private)
+	if (PagePrivate(page))
 		/*
-		 * The folio is dirty, which means it was budgeted twice:
+		 * The page is dirty, which means it was budgeted twice:
 		 *   o first time the budget was allocated by the task which
-		 *     made the folio dirty and set the private field;
+		 *     made the page dirty and set the PG_private flag;
 		 *   o and then we budgeted for it for the second time at the
 		 *     very beginning of this function.
 		 *
-		 * So what we have to do is to release the folio budget we
+		 * So what we have to do is to release the page budget we
 		 * allocated.
 		 */
 		release_new_page_budget(c);
-	else if (!folio_test_checked(folio))
+	else if (!PageChecked(page))
 		/*
-		 * We are changing a folio which already exists on the media.
-		 * This means that changing the folio does not make the amount
+		 * We are changing a page which already exists on the media.
+		 * This means that changing the page does not make the amount
 		 * of indexing information larger, and this part of the budget
 		 * which we have already acquired may be released.
 		 */
@@ -298,14 +304,14 @@ static int write_begin_slow(struct address_space *mapping,
 			ubifs_release_dirty_inode_budget(c, ui);
 	}
 
-	*pagep = &folio->page;
+	*pagep = page;
 	return 0;
 }
 
 /**
  * allocate_budget - allocate budget for 'ubifs_write_begin()'.
  * @c: UBIFS file-system description object
- * @folio: folio to allocate budget for
+ * @page: page to allocate budget for
  * @ui: UBIFS inode object the page belongs to
  * @appending: non-zero if the page is appended
  *
@@ -316,15 +322,15 @@ static int write_begin_slow(struct address_space *mapping,
  *
  * Returns: %0 in case of success and %-ENOSPC in case of failure.
  */
-static int allocate_budget(struct ubifs_info *c, struct folio *folio,
+static int allocate_budget(struct ubifs_info *c, struct page *page,
 			   struct ubifs_inode *ui, int appending)
 {
 	struct ubifs_budget_req req = { .fast = 1 };
 
-	if (folio->private) {
+	if (PagePrivate(page)) {
 		if (!appending)
 			/*
-			 * The folio is dirty and we are not appending, which
+			 * The page is dirty and we are not appending, which
 			 * means no budget is needed at all.
 			 */
 			return 0;
@@ -348,11 +354,11 @@ static int allocate_budget(struct ubifs_info *c, struct folio *folio,
 		 */
 		req.dirtied_ino = 1;
 	} else {
-		if (folio_test_checked(folio))
+		if (PageChecked(page))
 			/*
 			 * The page corresponds to a hole and does not
 			 * exist on the media. So changing it makes
-			 * the amount of indexing information
+			 * make the amount of indexing information
 			 * larger, and we have to budget for a new
 			 * page.
 			 */
@@ -422,7 +428,7 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 	pgoff_t index = pos >> PAGE_SHIFT;
 	int err, appending = !!(pos + len > inode->i_size);
 	int skipped_read = 0;
-	struct folio *folio;
+	struct page *page;
 
 	ubifs_assert(c, ubifs_inode(inode)->ui_size == inode->i_size);
 	ubifs_assert(c, !c->ro_media && !c->ro_mount);
@@ -431,14 +437,13 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 		return -EROFS;
 
 	/* Try out the fast-path part first */
-	folio = __filemap_get_folio(mapping, index, FGP_WRITEBEGIN,
-			mapping_gfp_mask(mapping));
-	if (IS_ERR(folio))
-		return PTR_ERR(folio);
+	page = grab_cache_page_write_begin(mapping, index);
+	if (unlikely(!page))
+		return -ENOMEM;
 
-	if (!folio_test_uptodate(folio)) {
+	if (!PageUptodate(page)) {
 		/* The page is not loaded from the flash */
-		if (pos == folio_pos(folio) && len >= folio_size(folio)) {
+		if (!(pos & ~PAGE_MASK) && len == PAGE_SIZE) {
 			/*
 			 * We change whole page so no need to load it. But we
 			 * do not know whether this page exists on the media or
@@ -448,27 +453,32 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 			 * media. Thus, we are setting the @PG_checked flag
 			 * here.
 			 */
-			folio_set_checked(folio);
+			SetPageChecked(page);
 			skipped_read = 1;
 		} else {
-			err = do_readpage(folio);
+			err = do_readpage(page);
 			if (err) {
-				folio_unlock(folio);
-				folio_put(folio);
+				unlock_page(page);
+				put_page(page);
 				return err;
 			}
 		}
+
+		SetPageUptodate(page);
+		ClearPageError(page);
 	}
 
-	err = allocate_budget(c, folio, ui, appending);
+	err = allocate_budget(c, page, ui, appending);
 	if (unlikely(err)) {
 		ubifs_assert(c, err == -ENOSPC);
 		/*
 		 * If we skipped reading the page because we were going to
 		 * write all of it, then it is not up to date.
 		 */
-		if (skipped_read)
-			folio_clear_checked(folio);
+		if (skipped_read) {
+			ClearPageChecked(page);
+			ClearPageUptodate(page);
+		}
 		/*
 		 * Budgeting failed which means it would have to force
 		 * write-back but didn't, because we set the @fast flag in the
@@ -480,8 +490,8 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 			ubifs_assert(c, mutex_is_locked(&ui->ui_mutex));
 			mutex_unlock(&ui->ui_mutex);
 		}
-		folio_unlock(folio);
-		folio_put(folio);
+		unlock_page(page);
+		put_page(page);
 
 		return write_begin_slow(mapping, pos, len, pagep);
 	}
@@ -492,21 +502,22 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 	 * with @ui->ui_mutex locked if we are appending pages, and unlocked
 	 * otherwise. This is an optimization (slightly hacky though).
 	 */
-	*pagep = &folio->page;
+	*pagep = page;
 	return 0;
+
 }
 
 /**
  * cancel_budget - cancel budget.
  * @c: UBIFS file-system description object
- * @folio: folio to cancel budget for
+ * @page: page to cancel budget for
  * @ui: UBIFS inode object the page belongs to
  * @appending: non-zero if the page is appended
  *
  * This is a helper function for a page write operation. It unlocks the
  * @ui->ui_mutex in case of appending.
  */
-static void cancel_budget(struct ubifs_info *c, struct folio *folio,
+static void cancel_budget(struct ubifs_info *c, struct page *page,
 			  struct ubifs_inode *ui, int appending)
 {
 	if (appending) {
@@ -514,8 +525,8 @@ static void cancel_budget(struct ubifs_info *c, struct folio *folio,
 			ubifs_release_dirty_inode_budget(c, ui);
 		mutex_unlock(&ui->ui_mutex);
 	}
-	if (!folio->private) {
-		if (folio_test_checked(folio))
+	if (!PagePrivate(page)) {
+		if (PageChecked(page))
 			release_new_page_budget(c);
 		else
 			release_existing_page_budget(c);
@@ -526,7 +537,6 @@ static int ubifs_write_end(struct file *file, struct address_space *mapping,
 			   loff_t pos, unsigned len, unsigned copied,
 			   struct page *page, void *fsdata)
 {
-	struct folio *folio = page_folio(page);
 	struct inode *inode = mapping->host;
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
@@ -534,47 +544,44 @@ static int ubifs_write_end(struct file *file, struct address_space *mapping,
 	int appending = !!(end_pos > inode->i_size);
 
 	dbg_gen("ino %lu, pos %llu, pg %lu, len %u, copied %d, i_size %lld",
-		inode->i_ino, pos, folio->index, len, copied, inode->i_size);
+		inode->i_ino, pos, page->index, len, copied, inode->i_size);
 
-	if (unlikely(copied < len && !folio_test_uptodate(folio))) {
+	if (unlikely(copied < len && len == PAGE_SIZE)) {
 		/*
-		 * VFS copied less data to the folio than it intended and
+		 * VFS copied less data to the page that it intended and
 		 * declared in its '->write_begin()' call via the @len
-		 * argument. If the folio was not up-to-date,
-		 * the 'ubifs_write_begin()' function did
+		 * argument. If the page was not up-to-date, and @len was
+		 * @PAGE_SIZE, the 'ubifs_write_begin()' function did
 		 * not load it from the media (for optimization reasons). This
-		 * means that part of the folio contains garbage. So read the
-		 * folio now.
+		 * means that part of the page contains garbage. So read the
+		 * page now.
 		 */
 		dbg_gen("copied %d instead of %d, read page and repeat",
 			copied, len);
-		cancel_budget(c, folio, ui, appending);
-		folio_clear_checked(folio);
+		cancel_budget(c, page, ui, appending);
+		ClearPageChecked(page);
 
 		/*
 		 * Return 0 to force VFS to repeat the whole operation, or the
 		 * error code if 'do_readpage()' fails.
 		 */
-		copied = do_readpage(folio);
+		copied = do_readpage(page);
 		goto out;
 	}
 
-	if (len == folio_size(folio))
-		folio_mark_uptodate(folio);
-
-	if (!folio->private) {
-		folio_attach_private(folio, (void *)1);
+	if (!PagePrivate(page)) {
+		attach_page_private(page, (void *)1);
 		atomic_long_inc(&c->dirty_pg_cnt);
-		filemap_dirty_folio(mapping, folio);
+		__set_page_dirty_nobuffers(page);
 	}
 
 	if (appending) {
 		i_size_write(inode, end_pos);
 		ui->ui_size = end_pos;
 		/*
-		 * We do not set @I_DIRTY_PAGES (which means that
-		 * the inode has dirty pages), this was done in
-		 * filemap_dirty_folio().
+		 * Note, we do not set @I_DIRTY_PAGES (which means that the
+		 * inode has dirty pages), this has been done in
+		 * '__set_page_dirty_nobuffers()'.
 		 */
 		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
 		ubifs_assert(c, mutex_is_locked(&ui->ui_mutex));
@@ -582,43 +589,43 @@ static int ubifs_write_end(struct file *file, struct address_space *mapping,
 	}
 
 out:
-	folio_unlock(folio);
-	folio_put(folio);
+	unlock_page(page);
+	put_page(page);
 	return copied;
 }
 
 /**
  * populate_page - copy data nodes into a page for bulk-read.
  * @c: UBIFS file-system description object
- * @folio: folio
+ * @page: page
  * @bu: bulk-read information
  * @n: next zbranch slot
  *
  * Returns: %0 on success and a negative error code on failure.
  */
-static int populate_page(struct ubifs_info *c, struct folio *folio,
+static int populate_page(struct ubifs_info *c, struct page *page,
 			 struct bu_info *bu, int *n)
 {
 	int i = 0, nn = *n, offs = bu->zbranch[0].offs, hole = 0, read = 0;
-	struct inode *inode = folio->mapping->host;
+	struct inode *inode = page->mapping->host;
 	loff_t i_size = i_size_read(inode);
 	unsigned int page_block;
 	void *addr, *zaddr;
 	pgoff_t end_index;
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld, flags %#lx",
-		inode->i_ino, folio->index, i_size, folio->flags);
+		inode->i_ino, page->index, i_size, page->flags);
 
-	addr = zaddr = kmap_local_folio(folio, 0);
+	addr = zaddr = kmap(page);
 
 	end_index = (i_size - 1) >> PAGE_SHIFT;
-	if (!i_size || folio->index > end_index) {
+	if (!i_size || page->index > end_index) {
 		hole = 1;
-		addr = folio_zero_tail(folio, 0, addr);
+		memset(addr, 0, PAGE_SIZE);
 		goto out_hole;
 	}
 
-	page_block = folio->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
+	page_block = page->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
 	while (1) {
 		int err, len, out_len, dlen;
 
@@ -667,13 +674,9 @@ static int populate_page(struct ubifs_info *c, struct folio *folio,
 			break;
 		addr += UBIFS_BLOCK_SIZE;
 		page_block += 1;
-		if (folio_test_highmem(folio) && (offset_in_page(addr) == 0)) {
-			kunmap_local(addr - UBIFS_BLOCK_SIZE);
-			addr = kmap_local_folio(folio, i * UBIFS_BLOCK_SIZE);
-		}
 	}
 
-	if (end_index == folio->index) {
+	if (end_index == page->index) {
 		int len = i_size & (PAGE_SIZE - 1);
 
 		if (len && len < read)
@@ -682,19 +685,22 @@ static int populate_page(struct ubifs_info *c, struct folio *folio,
 
 out_hole:
 	if (hole) {
-		folio_set_checked(folio);
+		SetPageChecked(page);
 		dbg_gen("hole");
 	}
 
-	folio_mark_uptodate(folio);
-	flush_dcache_folio(folio);
-	kunmap_local(addr);
+	SetPageUptodate(page);
+	ClearPageError(page);
+	flush_dcache_page(page);
+	kunmap(page);
 	*n = nn;
 	return 0;
 
 out_err:
-	flush_dcache_folio(folio);
-	kunmap_local(addr);
+	ClearPageUptodate(page);
+	SetPageError(page);
+	flush_dcache_page(page);
+	kunmap(page);
 	ubifs_err(c, "bad data node (block %u, inode %lu)",
 		  page_block, inode->i_ino);
 	return -EINVAL;
@@ -704,15 +710,15 @@ out_err:
  * ubifs_do_bulk_read - do bulk-read.
  * @c: UBIFS file-system description object
  * @bu: bulk-read information
- * @folio1: first folio to read
+ * @page1: first page to read
  *
  * Returns: %1 if the bulk-read is done, otherwise %0 is returned.
  */
 static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
-			      struct folio *folio1)
+			      struct page *page1)
 {
-	pgoff_t offset = folio1->index, end_index;
-	struct address_space *mapping = folio1->mapping;
+	pgoff_t offset = page1->index, end_index;
+	struct address_space *mapping = page1->mapping;
 	struct inode *inode = mapping->host;
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	int err, page_idx, page_cnt, ret = 0, n = 0;
@@ -762,11 +768,11 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
 			goto out_warn;
 	}
 
-	err = populate_page(c, folio1, bu, &n);
+	err = populate_page(c, page1, bu, &n);
 	if (err)
 		goto out_warn;
 
-	folio_unlock(folio1);
+	unlock_page(page1);
 	ret = 1;
 
 	isize = i_size_read(inode);
@@ -776,19 +782,19 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct bu_info *bu,
 
 	for (page_idx = 1; page_idx < page_cnt; page_idx++) {
 		pgoff_t page_offset = offset + page_idx;
-		struct folio *folio;
+		struct page *page;
 
 		if (page_offset > end_index)
 			break;
-		folio = __filemap_get_folio(mapping, page_offset,
+		page = pagecache_get_page(mapping, page_offset,
 				 FGP_LOCK|FGP_ACCESSED|FGP_CREAT|FGP_NOWAIT,
 				 ra_gfp_mask);
-		if (IS_ERR(folio))
+		if (!page)
 			break;
-		if (!folio_test_uptodate(folio))
-			err = populate_page(c, folio, bu, &n);
-		folio_unlock(folio);
-		folio_put(folio);
+		if (!PageUptodate(page))
+			err = populate_page(c, page, bu, &n);
+		unlock_page(page);
+		put_page(page);
 		if (err)
 			break;
 	}
@@ -811,7 +817,7 @@ out_bu_off:
 
 /**
  * ubifs_bulk_read - determine whether to bulk-read and, if so, do it.
- * @folio: folio from which to start bulk-read.
+ * @page: page from which to start bulk-read.
  *
  * Some flash media are capable of reading sequentially at faster rates. UBIFS
  * bulk-read facility is designed to take advantage of that, by reading in one
@@ -820,12 +826,12 @@ out_bu_off:
  *
  * Returns: %1 if a bulk-read is done and %0 otherwise.
  */
-static int ubifs_bulk_read(struct folio *folio)
+static int ubifs_bulk_read(struct page *page)
 {
-	struct inode *inode = folio->mapping->host;
+	struct inode *inode = page->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	struct ubifs_inode *ui = ubifs_inode(inode);
-	pgoff_t index = folio->index, last_page_read = ui->last_page_read;
+	pgoff_t index = page->index, last_page_read = ui->last_page_read;
 	struct bu_info *bu;
 	int err = 0, allocated = 0;
 
@@ -873,8 +879,8 @@ static int ubifs_bulk_read(struct folio *folio)
 
 	bu->buf_len = c->max_bu_buf_len;
 	data_key_init(c, &bu->key, inode->i_ino,
-		      folio->index << UBIFS_BLOCKS_PER_PAGE_SHIFT);
-	err = ubifs_do_bulk_read(c, bu, folio);
+		      page->index << UBIFS_BLOCKS_PER_PAGE_SHIFT);
+	err = ubifs_do_bulk_read(c, bu, page);
 
 	if (!allocated)
 		mutex_unlock(&c->bu_mutex);
@@ -888,71 +894,69 @@ out_unlock:
 
 static int ubifs_read_folio(struct file *file, struct folio *folio)
 {
-	if (ubifs_bulk_read(folio))
+	struct page *page = &folio->page;
+
+	if (ubifs_bulk_read(page))
 		return 0;
-	do_readpage(folio);
+	do_readpage(page);
 	folio_unlock(folio);
 	return 0;
 }
 
-static int do_writepage(struct folio *folio, size_t len)
+static int do_writepage(struct page *page, int len)
 {
-	int err = 0, blen;
+	int err = 0, i, blen;
 	unsigned int block;
 	void *addr;
-	size_t offset = 0;
 	union ubifs_key key;
-	struct inode *inode = folio->mapping->host;
+	struct inode *inode = page->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 
 #ifdef UBIFS_DEBUG
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	spin_lock(&ui->ui_lock);
-	ubifs_assert(c, folio->index <= ui->synced_i_size >> PAGE_SHIFT);
+	ubifs_assert(c, page->index <= ui->synced_i_size >> PAGE_SHIFT);
 	spin_unlock(&ui->ui_lock);
 #endif
 
-	folio_start_writeback(folio);
+	/* Update radix tree tags */
+	set_page_writeback(page);
 
-	addr = kmap_local_folio(folio, offset);
-	block = folio->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
-	for (;;) {
-		blen = min_t(size_t, len, UBIFS_BLOCK_SIZE);
+	addr = kmap(page);
+	block = page->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
+	i = 0;
+	while (len) {
+		blen = min_t(int, len, UBIFS_BLOCK_SIZE);
 		data_key_init(c, &key, inode->i_ino, block);
 		err = ubifs_jnl_write_data(c, inode, &key, addr, blen);
 		if (err)
 			break;
-		len -= blen;
-		if (!len)
+		if (++i >= UBIFS_BLOCKS_PER_PAGE)
 			break;
 		block += 1;
 		addr += blen;
-		if (folio_test_highmem(folio) && !offset_in_page(addr)) {
-			kunmap_local(addr - blen);
-			offset += PAGE_SIZE;
-			addr = kmap_local_folio(folio, offset);
-		}
+		len -= blen;
 	}
-	kunmap_local(addr);
 	if (err) {
-		mapping_set_error(folio->mapping, err);
-		ubifs_err(c, "cannot write folio %lu of inode %lu, error %d",
-			  folio->index, inode->i_ino, err);
+		SetPageError(page);
+		ubifs_err(c, "cannot write page %lu of inode %lu, error %d",
+			  page->index, inode->i_ino, err);
 		ubifs_ro_mode(c, err);
 	}
 
-	ubifs_assert(c, folio->private != NULL);
-	if (folio_test_checked(folio))
+	ubifs_assert(c, PagePrivate(page));
+	if (PageChecked(page))
 		release_new_page_budget(c);
 	else
 		release_existing_page_budget(c);
 
 	atomic_long_dec(&c->dirty_pg_cnt);
-	folio_detach_private(folio);
-	folio_clear_checked(folio);
+	detach_page_private(page);
+	ClearPageChecked(page);
 
-	folio_unlock(folio);
-	folio_end_writeback(folio);
+	kunmap(page);
+	unlock_page(page);
+	end_page_writeback(page);
 	return err;
 }
 
@@ -1002,21 +1006,22 @@ static int do_writepage(struct folio *folio, size_t len)
  * on the page lock and it would not write the truncated inode node to the
  * journal before we have finished.
  */
-static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc,
-		void *data)
+static int ubifs_writepage(struct page *page, struct writeback_control *wbc)
 {
-	struct inode *inode = folio->mapping->host;
+	struct inode *inode = page->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	loff_t i_size =  i_size_read(inode), synced_i_size;
-	int err, len = folio_size(folio);
+	pgoff_t end_index = i_size >> PAGE_SHIFT;
+	int err, len = i_size & (PAGE_SIZE - 1);
+	void *kaddr;
 
 	dbg_gen("ino %lu, pg %lu, pg flags %#lx",
-		inode->i_ino, folio->index, folio->flags);
-	ubifs_assert(c, folio->private != NULL);
+		inode->i_ino, page->index, page->flags);
+	ubifs_assert(c, PagePrivate(page));
 
-	/* Is the folio fully outside @i_size? (truncate in progress) */
-	if (folio_pos(folio) >= i_size) {
+	/* Is the page fully outside @i_size? (truncate in progress) */
+	if (page->index > end_index || (page->index == end_index && !len)) {
 		err = 0;
 		goto out_unlock;
 	}
@@ -1025,9 +1030,9 @@ static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc,
 	synced_i_size = ui->synced_i_size;
 	spin_unlock(&ui->ui_lock);
 
-	/* Is the folio fully inside i_size? */
-	if (folio_pos(folio) + len <= i_size) {
-		if (folio_pos(folio) >= synced_i_size) {
+	/* Is the page fully inside @i_size? */
+	if (page->index < end_index) {
+		if (page->index >= synced_i_size >> PAGE_SHIFT) {
 			err = inode->i_sb->s_op->write_inode(inode, NULL);
 			if (err)
 				goto out_redirty;
@@ -1040,18 +1045,20 @@ static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc,
 			 * with this.
 			 */
 		}
-		return do_writepage(folio, len);
+		return do_writepage(page, PAGE_SIZE);
 	}
 
 	/*
-	 * The folio straddles @i_size. It must be zeroed out on each and every
+	 * The page straddles @i_size. It must be zeroed out on each and every
 	 * writepage invocation because it may be mmapped. "A file is mapped
 	 * in multiples of the page size. For a file that is not a multiple of
 	 * the page size, the remaining memory is zeroed when mapped, and
 	 * writes to that region are not written out to the file."
 	 */
-	len = i_size - folio_pos(folio);
-	folio_zero_segment(folio, len, folio_size(folio));
+	kaddr = kmap_atomic(page);
+	memset(kaddr + len, 0, PAGE_SIZE - len);
+	flush_dcache_page(page);
+	kunmap_atomic(kaddr);
 
 	if (i_size > synced_i_size) {
 		err = inode->i_sb->s_op->write_inode(inode, NULL);
@@ -1059,23 +1066,17 @@ static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc,
 			goto out_redirty;
 	}
 
-	return do_writepage(folio, len);
+	return do_writepage(page, len);
 out_redirty:
 	/*
-	 * folio_redirty_for_writepage() won't call ubifs_dirty_inode() because
+	 * redirty_page_for_writepage() won't call ubifs_dirty_inode() because
 	 * it passes I_DIRTY_PAGES flag while calling __mark_inode_dirty(), so
 	 * there is no need to do space budget for dirty inode.
 	 */
-	folio_redirty_for_writepage(wbc, folio);
+	redirty_page_for_writepage(wbc, page);
 out_unlock:
-	folio_unlock(folio);
+	unlock_page(page);
 	return err;
-}
-
-static int ubifs_writepages(struct address_space *mapping,
-		struct writeback_control *wbc)
-{
-	return write_cache_pages(mapping, wbc, ubifs_writepage, NULL);
 }
 
 /**
@@ -1154,11 +1155,11 @@ static int do_truncation(struct ubifs_info *c, struct inode *inode,
 
 	if (offset) {
 		pgoff_t index = new_size >> PAGE_SHIFT;
-		struct folio *folio;
+		struct page *page;
 
-		folio = filemap_lock_folio(inode->i_mapping, index);
-		if (!IS_ERR(folio)) {
-			if (folio_test_dirty(folio)) {
+		page = find_lock_page(inode->i_mapping, index);
+		if (page) {
+			if (PageDirty(page)) {
 				/*
 				 * 'ubifs_jnl_truncate()' will try to truncate
 				 * the last data node, but it contains
@@ -1167,14 +1168,14 @@ static int do_truncation(struct ubifs_info *c, struct inode *inode,
 				 * 'ubifs_jnl_truncate()' will see an already
 				 * truncated (and up to date) data node.
 				 */
-				ubifs_assert(c, folio->private != NULL);
+				ubifs_assert(c, PagePrivate(page));
 
-				folio_clear_dirty_for_io(folio);
+				clear_page_dirty_for_io(page);
 				if (UBIFS_BLOCKS_PER_PAGE_SHIFT)
-					offset = offset_in_folio(folio,
-							new_size);
-				err = do_writepage(folio, offset);
-				folio_put(folio);
+					offset = new_size &
+						 (PAGE_SIZE - 1);
+				err = do_writepage(page, offset);
+				put_page(page);
 				if (err)
 					goto out_budg;
 				/*
@@ -1187,8 +1188,8 @@ static int do_truncation(struct ubifs_info *c, struct inode *inode,
 				 * to 'ubifs_jnl_truncate()' to save it from
 				 * having to read it.
 				 */
-				folio_unlock(folio);
-				folio_put(folio);
+				unlock_page(page);
+				put_page(page);
 			}
 		}
 	}
@@ -1511,14 +1512,14 @@ static bool ubifs_release_folio(struct folio *folio, gfp_t unused_gfp_flags)
  */
 static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 {
-	struct folio *folio = page_folio(vmf->page);
+	struct page *page = vmf->page;
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	struct timespec64 now = current_time(inode);
 	struct ubifs_budget_req req = { .new_page = 1 };
 	int err, update_time;
 
-	dbg_gen("ino %lu, pg %lu, i_size %lld",	inode->i_ino, folio->index,
+	dbg_gen("ino %lu, pg %lu, i_size %lld",	inode->i_ino, page->index,
 		i_size_read(inode));
 	ubifs_assert(c, !c->ro_media && !c->ro_mount);
 
@@ -1526,17 +1527,17 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 		return VM_FAULT_SIGBUS; /* -EROFS */
 
 	/*
-	 * We have not locked @folio so far so we may budget for changing the
-	 * folio. Note, we cannot do this after we locked the folio, because
+	 * We have not locked @page so far so we may budget for changing the
+	 * page. Note, we cannot do this after we locked the page, because
 	 * budgeting may cause write-back which would cause deadlock.
 	 *
-	 * At the moment we do not know whether the folio is dirty or not, so we
-	 * assume that it is not and budget for a new folio. We could look at
+	 * At the moment we do not know whether the page is dirty or not, so we
+	 * assume that it is not and budget for a new page. We could look at
 	 * the @PG_private flag and figure this out, but we may race with write
-	 * back and the folio state may change by the time we lock it, so this
+	 * back and the page state may change by the time we lock it, so this
 	 * would need additional care. We do not bother with this at the
 	 * moment, although it might be good idea to do. Instead, we allocate
-	 * budget for a new folio and amend it later on if the folio was in fact
+	 * budget for a new page and amend it later on if the page was in fact
 	 * dirty.
 	 *
 	 * The budgeting-related logic of this function is similar to what we
@@ -1559,21 +1560,21 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 		return VM_FAULT_SIGBUS;
 	}
 
-	folio_lock(folio);
-	if (unlikely(folio->mapping != inode->i_mapping ||
-		     folio_pos(folio) >= i_size_read(inode))) {
-		/* Folio got truncated out from underneath us */
+	lock_page(page);
+	if (unlikely(page->mapping != inode->i_mapping ||
+		     page_offset(page) > i_size_read(inode))) {
+		/* Page got truncated out from underneath us */
 		goto sigbus;
 	}
 
-	if (folio->private)
+	if (PagePrivate(page))
 		release_new_page_budget(c);
 	else {
-		if (!folio_test_checked(folio))
+		if (!PageChecked(page))
 			ubifs_convert_page_budget(c);
-		folio_attach_private(folio, (void *)1);
+		attach_page_private(page, (void *)1);
 		atomic_long_inc(&c->dirty_pg_cnt);
-		filemap_dirty_folio(folio->mapping, folio);
+		__set_page_dirty_nobuffers(page);
 	}
 
 	if (update_time) {
@@ -1589,11 +1590,11 @@ static vm_fault_t ubifs_vm_page_mkwrite(struct vm_fault *vmf)
 			ubifs_release_dirty_inode_budget(c, ui);
 	}
 
-	folio_wait_stable(folio);
+	wait_for_stable_page(page);
 	return VM_FAULT_LOCKED;
 
 sigbus:
-	folio_unlock(folio);
+	unlock_page(page);
 	ubifs_release_budget(c, &req);
 	return VM_FAULT_SIGBUS;
 }
@@ -1647,7 +1648,7 @@ static int ubifs_symlink_getattr(struct mnt_idmap *idmap,
 
 const struct address_space_operations ubifs_file_address_operations = {
 	.read_folio     = ubifs_read_folio,
-	.writepages     = ubifs_writepages,
+	.writepage      = ubifs_writepage,
 	.write_begin    = ubifs_write_begin,
 	.write_end      = ubifs_write_end,
 	.invalidate_folio = ubifs_invalidate_folio,

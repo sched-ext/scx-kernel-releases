@@ -309,6 +309,7 @@ struct hid_data {
 	bool confidence;
 	int x;
 	int y;
+	int pressure;
 	int width;
 	int height;
 	int id;

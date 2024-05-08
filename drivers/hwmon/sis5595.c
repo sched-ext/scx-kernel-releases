@@ -153,9 +153,13 @@ static inline s8 TEMP_TO_REG(long val)
 }
 
 /*
- * FAN DIV: 1, 2, 4, or 8
- * REG: 0, 1, 2, or 3 (respectively)
+ * FAN DIV: 1, 2, 4, or 8 (defaults to 2)
+ * REG: 0, 1, 2, or 3 (respectively) (defaults to 1)
  */
+static inline u8 DIV_TO_REG(int val)
+{
+	return val == 8 ? 3 : val == 4 ? 2 : val == 1 ? 0 : 1;
+}
 #define DIV_FROM_REG(val) (1 << (val))
 
 /*

@@ -1566,7 +1566,7 @@ fail_tty_driver_kref_put:
 	return error;
 }
 
-static void __exit amiga_serial_remove(struct platform_device *pdev)
+static int __exit amiga_serial_remove(struct platform_device *pdev)
 {
 	struct serial_state *state = platform_get_drvdata(pdev);
 
@@ -1576,10 +1576,12 @@ static void __exit amiga_serial_remove(struct platform_device *pdev)
 
 	free_irq(IRQ_AMIGA_TBE, state);
 	free_irq(IRQ_AMIGA_RBF, state);
+
+	return 0;
 }
 
 static struct platform_driver amiga_serial_driver = {
-	.remove_new = __exit_p(amiga_serial_remove),
+	.remove = __exit_p(amiga_serial_remove),
 	.driver   = {
 		.name	= "amiga-serial",
 	},

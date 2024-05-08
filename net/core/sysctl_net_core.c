@@ -23,8 +23,6 @@
 #include <net/net_ratelimit.h>
 #include <net/busy_poll.h>
 #include <net/pkt_sched.h>
-#include <net/hotdata.h>
-#include <net/rps.h>
 
 #include "dev.h"
 
@@ -32,7 +30,6 @@ static int int_3600 = 3600;
 static int min_sndbuf = SOCK_MIN_SNDBUF;
 static int min_rcvbuf = SOCK_MIN_RCVBUF;
 static int max_skb_frags = MAX_SKB_FRAGS;
-static int min_mem_pcpu_rsv = SK_MEMORY_PCPU_RESERVE;
 
 static int net_msg_warn;	/* Unused, but still a sysctl */
 
@@ -140,8 +137,7 @@ static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 
 	mutex_lock(&sock_flow_mutex);
 
-	orig_sock_table = rcu_dereference_protected(
-					net_hotdata.rps_sock_flow_table,
+	orig_sock_table = rcu_dereference_protected(rps_sock_flow_table,
 					lockdep_is_held(&sock_flow_mutex));
 	size = orig_size = orig_sock_table ? orig_sock_table->mask + 1 : 0;
 
@@ -162,8 +158,7 @@ static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 					mutex_unlock(&sock_flow_mutex);
 					return -ENOMEM;
 				}
-				net_hotdata.rps_cpu_mask =
-					roundup_pow_of_two(nr_cpu_ids) - 1;
+				rps_cpu_mask = roundup_pow_of_two(nr_cpu_ids) - 1;
 				sock_table->mask = size - 1;
 			} else
 				sock_table = orig_sock_table;
@@ -174,8 +169,7 @@ static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 			sock_table = NULL;
 
 		if (sock_table != orig_sock_table) {
-			rcu_assign_pointer(net_hotdata.rps_sock_flow_table,
-					   sock_table);
+			rcu_assign_pointer(rps_sock_flow_table, sock_table);
 			if (sock_table) {
 				static_branch_inc(&rps_needed);
 				static_branch_inc(&rfs_needed);
@@ -305,8 +299,8 @@ static int proc_do_dev_weight(struct ctl_table *table, int write,
 	ret = proc_dointvec(table, write, buffer, lenp, ppos);
 	if (!ret && write) {
 		weight = READ_ONCE(weight_p);
-		WRITE_ONCE(net_hotdata.dev_rx_weight, weight * dev_weight_rx_bias);
-		WRITE_ONCE(net_hotdata.dev_tx_weight, weight * dev_weight_tx_bias);
+		WRITE_ONCE(dev_rx_weight, weight * dev_weight_rx_bias);
+		WRITE_ONCE(dev_tx_weight, weight * dev_weight_tx_bias);
 	}
 	mutex_unlock(&dev_weight_mutex);
 
@@ -414,14 +408,6 @@ static struct ctl_table net_core_table[] = {
 		.extra1		= &min_rcvbuf,
 	},
 	{
-		.procname	= "mem_pcpu_rsv",
-		.data		= &sysctl_mem_pcpu_rsv,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &min_mem_pcpu_rsv,
-	},
-	{
 		.procname	= "dev_weight",
 		.data		= &weight_p,
 		.maxlen		= sizeof(int),
@@ -444,7 +430,7 @@ static struct ctl_table net_core_table[] = {
 	},
 	{
 		.procname	= "netdev_max_backlog",
-		.data		= &net_hotdata.max_backlog,
+		.data		= &netdev_max_backlog,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
@@ -503,7 +489,7 @@ static struct ctl_table net_core_table[] = {
 #endif
 	{
 		.procname	= "netdev_tstamp_prequeue",
-		.data		= &net_hotdata.tstamp_prequeue,
+		.data		= &netdev_tstamp_prequeue,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
@@ -581,7 +567,7 @@ static struct ctl_table net_core_table[] = {
 #endif
 	{
 		.procname	= "netdev_budget",
-		.data		= &net_hotdata.netdev_budget,
+		.data		= &netdev_budget,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
@@ -604,7 +590,7 @@ static struct ctl_table net_core_table[] = {
 	},
 	{
 		.procname	= "netdev_budget_usecs",
-		.data		= &net_hotdata.netdev_budget_usecs,
+		.data		= &netdev_budget_usecs,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -637,7 +623,7 @@ static struct ctl_table net_core_table[] = {
 	},
 	{
 		.procname	= "gro_normal_batch",
-		.data		= &net_hotdata.gro_normal_batch,
+		.data		= &gro_normal_batch,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,

@@ -83,6 +83,7 @@ struct framer_ops {
 /**
  * struct framer_provider - represents the framer provider
  * @dev: framer provider device
+ * @children: can be used to override the default (dev->of_node) child node
  * @owner: the module owner having of_xlate
  * @list: to maintain a linked list of framer providers
  * @of_xlate: function pointer to obtain framer instance from framer pointer
@@ -92,7 +93,7 @@ struct framer_provider {
 	struct module		*owner;
 	struct list_head	list;
 	struct framer * (*of_xlate)(struct device *dev,
-				    const struct of_phandle_args *args);
+				    struct of_phandle_args *args);
 };
 
 static inline void framer_set_drvdata(struct framer *framer, void *data)
@@ -117,19 +118,19 @@ struct framer *devm_framer_create(struct device *dev, struct device_node *node,
 				  const struct framer_ops *ops);
 
 struct framer *framer_provider_simple_of_xlate(struct device *dev,
-					       const struct of_phandle_args *args);
+					       struct of_phandle_args *args);
 
 struct framer_provider *
 __framer_provider_of_register(struct device *dev, struct module *owner,
 			      struct framer *(*of_xlate)(struct device *dev,
-							 const struct of_phandle_args *args));
+							 struct of_phandle_args *args));
 
 void framer_provider_of_unregister(struct framer_provider *framer_provider);
 
 struct framer_provider *
 __devm_framer_provider_of_register(struct device *dev, struct module *owner,
 				   struct framer *(*of_xlate)(struct device *dev,
-							      const struct of_phandle_args *args));
+							      struct of_phandle_args *args));
 
 void framer_notify_status_change(struct framer *framer);
 
@@ -153,7 +154,7 @@ static inline struct framer *devm_framer_create(struct device *dev, struct devic
 }
 
 static inline struct framer *framer_provider_simple_of_xlate(struct device *dev,
-							     const struct of_phandle_args *args)
+							     struct of_phandle_args *args)
 {
 	return ERR_PTR(-ENOSYS);
 }
@@ -161,7 +162,7 @@ static inline struct framer *framer_provider_simple_of_xlate(struct device *dev,
 static inline struct framer_provider *
 __framer_provider_of_register(struct device *dev, struct module *owner,
 			      struct framer *(*of_xlate)(struct device *dev,
-							 const struct of_phandle_args *args))
+							 struct of_phandle_args *args))
 {
 	return ERR_PTR(-ENOSYS);
 }
@@ -173,7 +174,7 @@ void framer_provider_of_unregister(struct framer_provider *framer_provider)
 static inline struct framer_provider *
 __devm_framer_provider_of_register(struct device *dev, struct module *owner,
 				   struct framer *(*of_xlate)(struct device *dev,
-							      const struct of_phandle_args *args))
+							      struct of_phandle_args *args))
 {
 	return ERR_PTR(-ENOSYS);
 }

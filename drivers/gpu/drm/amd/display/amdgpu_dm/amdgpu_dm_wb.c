@@ -76,8 +76,10 @@ static int amdgpu_dm_wb_encoder_atomic_check(struct drm_encoder *encoder,
 
 static int amdgpu_dm_wb_connector_get_modes(struct drm_connector *connector)
 {
-	/* Maximum resolution supported by DWB */
-	return drm_add_modes_noedid(connector, 3840, 2160);
+	struct drm_device *dev = connector->dev;
+
+	return drm_add_modes_noedid(connector, dev->mode_config.max_width,
+				    dev->mode_config.max_height);
 }
 
 static int amdgpu_dm_wb_prepare_job(struct drm_writeback_connector *wb_connector,

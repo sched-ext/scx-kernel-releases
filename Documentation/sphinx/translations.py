@@ -29,7 +29,10 @@ all_languages = {
 }
 
 class LanguagesNode(nodes.Element):
-    pass
+    def __init__(self, current_language, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.current_language = current_language
 
 class TranslationsTransform(Transform):
     default_priority = 900
@@ -46,8 +49,7 @@ class TranslationsTransform(Transform):
             # normalize docname to be the untranslated one
             docname = os.path.join(*components[2:])
 
-        new_nodes = LanguagesNode()
-        new_nodes['current_language'] = all_languages[this_lang_code]
+        new_nodes = LanguagesNode(all_languages[this_lang_code])
 
         for lang_code, lang_name in all_languages.items():
             if lang_code == this_lang_code:
@@ -82,7 +84,7 @@ def process_languages(app, doctree, docname):
 
         html_content = app.builder.templates.render('translations.html',
             context={
-                'current_language': node['current_language'],
+                'current_language': node.current_language,
                 'languages': languages,
             })
 

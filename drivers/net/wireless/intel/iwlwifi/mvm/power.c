@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2019, 2021-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2019, 2021-2023 Intel Corporation
  * Copyright (C) 2013-2014 Intel Mobile Communications GmbH
  * Copyright (C) 2015-2017 Intel Deutschland GmbH
  */
@@ -20,7 +20,8 @@
 
 static
 int iwl_mvm_beacon_filter_send_cmd(struct iwl_mvm *mvm,
-				   struct iwl_beacon_filter_cmd *cmd)
+				   struct iwl_beacon_filter_cmd *cmd,
+				   u32 flags)
 {
 	u16 len;
 
@@ -61,7 +62,7 @@ int iwl_mvm_beacon_filter_send_cmd(struct iwl_mvm *mvm,
 		len = offsetof(struct iwl_beacon_filter_cmd,
 			       bf_threshold_absolute_low);
 
-	return iwl_mvm_send_cmd_pdu(mvm, REPLY_BEACON_FILTERING_CMD, 0,
+	return iwl_mvm_send_cmd_pdu(mvm, REPLY_BEACON_FILTERING_CMD, flags,
 				    len, cmd);
 }
 
@@ -812,7 +813,8 @@ iwl_mvm_beacon_filter_debugfs_parameters(struct ieee80211_vif *vif,
 
 static int _iwl_mvm_enable_beacon_filter(struct iwl_mvm *mvm,
 					 struct ieee80211_vif *vif,
-					 struct iwl_beacon_filter_cmd *cmd)
+					 struct iwl_beacon_filter_cmd *cmd,
+					 u32 cmd_flags)
 {
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
 	int ret;
@@ -823,7 +825,7 @@ static int _iwl_mvm_enable_beacon_filter(struct iwl_mvm *mvm,
 
 	iwl_mvm_beacon_filter_set_cqm_params(mvm, vif, cmd);
 	iwl_mvm_beacon_filter_debugfs_parameters(vif, cmd);
-	ret = iwl_mvm_beacon_filter_send_cmd(mvm, cmd);
+	ret = iwl_mvm_beacon_filter_send_cmd(mvm, cmd, cmd_flags);
 
 	if (!ret)
 		mvmvif->bf_data.bf_enabled = true;
@@ -832,18 +834,20 @@ static int _iwl_mvm_enable_beacon_filter(struct iwl_mvm *mvm,
 }
 
 int iwl_mvm_enable_beacon_filter(struct iwl_mvm *mvm,
-				 struct ieee80211_vif *vif)
+				 struct ieee80211_vif *vif,
+				 u32 flags)
 {
 	struct iwl_beacon_filter_cmd cmd = {
 		IWL_BF_CMD_CONFIG_DEFAULTS,
 		.bf_enable_beacon_filter = cpu_to_le32(1),
 	};
 
-	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd);
+	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd, flags);
 }
 
 static int _iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
-					  struct ieee80211_vif *vif)
+					  struct ieee80211_vif *vif,
+					  u32 flags)
 {
 	struct iwl_beacon_filter_cmd cmd = {};
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
@@ -852,7 +856,7 @@ static int _iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
 	if (vif->type != NL80211_IFTYPE_STATION || vif->p2p)
 		return 0;
 
-	ret = iwl_mvm_beacon_filter_send_cmd(mvm, &cmd);
+	ret = iwl_mvm_beacon_filter_send_cmd(mvm, &cmd, flags);
 
 	if (!ret)
 		mvmvif->bf_data.bf_enabled = false;
@@ -861,9 +865,10 @@ static int _iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
 }
 
 int iwl_mvm_disable_beacon_filter(struct iwl_mvm *mvm,
-				  struct ieee80211_vif *vif)
+				  struct ieee80211_vif *vif,
+				  u32 flags)
 {
-	return _iwl_mvm_disable_beacon_filter(mvm, vif);
+	return _iwl_mvm_disable_beacon_filter(mvm, vif, flags);
 }
 
 static int iwl_mvm_power_set_ps(struct iwl_mvm *mvm)
@@ -914,7 +919,7 @@ static int iwl_mvm_power_set_ba(struct iwl_mvm *mvm,
 				       !vif->cfg.ps ||
 				       iwl_mvm_vif_low_latency(mvmvif));
 
-	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd);
+	return _iwl_mvm_enable_beacon_filter(mvm, vif, &cmd, 0);
 }
 
 int iwl_mvm_power_update_ps(struct iwl_mvm *mvm)

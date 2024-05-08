@@ -11,8 +11,10 @@
 #include <linux/math64.h>
 #include "misc.h"
 #include "ctree.h"
+#include "extent_map.h"
 #include "disk-io.h"
 #include "transaction.h"
+#include "print-tree.h"
 #include "volumes.h"
 #include "async-thread.h"
 #include "dev-replace.h"
@@ -244,7 +246,7 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_device *device;
-	struct file *bdev_file;
+	struct bdev_handle *bdev_handle;
 	struct block_device *bdev;
 	u64 devid = BTRFS_DEV_REPLACE_DEVID;
 	int ret = 0;
@@ -255,13 +257,13 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 		return -EINVAL;
 	}
 
-	bdev_file = bdev_file_open_by_path(device_path, BLK_OPEN_WRITE,
+	bdev_handle = bdev_open_by_path(device_path, BLK_OPEN_WRITE,
 					fs_info->bdev_holder, NULL);
-	if (IS_ERR(bdev_file)) {
+	if (IS_ERR(bdev_handle)) {
 		btrfs_err(fs_info, "target device %s is invalid!", device_path);
-		return PTR_ERR(bdev_file);
+		return PTR_ERR(bdev_handle);
 	}
-	bdev = file_bdev(bdev_file);
+	bdev = bdev_handle->bdev;
 
 	if (!btrfs_check_device_zone_type(fs_info, bdev)) {
 		btrfs_err(fs_info,
@@ -312,7 +314,7 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 	device->commit_bytes_used = device->bytes_used;
 	device->fs_info = fs_info;
 	device->bdev = bdev;
-	device->bdev_file = bdev_file;
+	device->bdev_handle = bdev_handle;
 	set_bit(BTRFS_DEV_STATE_IN_FS_METADATA, &device->dev_state);
 	set_bit(BTRFS_DEV_STATE_REPLACE_TGT, &device->dev_state);
 	device->dev_stats_valid = 1;
@@ -333,7 +335,7 @@ static int btrfs_init_dev_replace_tgtdev(struct btrfs_fs_info *fs_info,
 	return 0;
 
 error:
-	fput(bdev_file);
+	bdev_release(bdev_handle);
 	return ret;
 }
 
@@ -723,23 +725,6 @@ leave:
 	return ret;
 }
 
-static int btrfs_check_replace_dev_names(struct btrfs_ioctl_dev_replace_args *args)
-{
-	if (args->start.srcdevid == 0) {
-		if (memchr(args->start.srcdev_name, 0,
-			   sizeof(args->start.srcdev_name)) == NULL)
-			return -ENAMETOOLONG;
-	} else {
-		args->start.srcdev_name[0] = 0;
-	}
-
-	if (memchr(args->start.tgtdev_name, 0,
-		   sizeof(args->start.tgtdev_name)) == NULL)
-	    return -ENAMETOOLONG;
-
-	return 0;
-}
-
 int btrfs_dev_replace_by_ioctl(struct btrfs_fs_info *fs_info,
 			    struct btrfs_ioctl_dev_replace_args *args)
 {
@@ -752,9 +737,10 @@ int btrfs_dev_replace_by_ioctl(struct btrfs_fs_info *fs_info,
 	default:
 		return -EINVAL;
 	}
-	ret = btrfs_check_replace_dev_names(args);
-	if (ret < 0)
-		return ret;
+
+	if ((args->start.srcdevid == 0 && args->start.srcdev_name[0] == '\0') ||
+	    args->start.tgtdev_name[0] == '\0')
+		return -EINVAL;
 
 	ret = btrfs_dev_replace_start(fs_info, args->start.tgtdev_name,
 					args->start.srcdevid,
@@ -998,7 +984,8 @@ error:
 	btrfs_sysfs_remove_device(src_device);
 	btrfs_sysfs_update_devid(tgt_device);
 	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &src_device->dev_state))
-		btrfs_scratch_superblocks(fs_info, src_device);
+		btrfs_scratch_superblocks(fs_info, src_device->bdev,
+					  src_device->name->str);
 
 	/* write back the superblocks */
 	trans = btrfs_start_transaction(root, 0);

@@ -45,25 +45,6 @@ int xfarray_store(struct xfarray *array, xfarray_idx_t idx, const void *ptr);
 int xfarray_store_anywhere(struct xfarray *array, const void *ptr);
 bool xfarray_element_is_null(struct xfarray *array, const void *ptr);
 
-/*
- * Load an array element, but zero the buffer if there's no data because we
- * haven't stored to that array element yet.
- */
-static inline int
-xfarray_load_sparse(
-	struct xfarray	*array,
-	uint64_t	idx,
-	void		*rec)
-{
-	int		error = xfarray_load(array, idx, rec);
-
-	if (error == -ENODATA) {
-		memset(rec, 0, array->obj_size);
-		return 0;
-	}
-	return error;
-}
-
 /* Append an element to the array. */
 static inline int xfarray_append(struct xfarray *array, const void *ptr)
 {
@@ -124,14 +105,9 @@ struct xfarray_sortinfo {
 	/* XFARRAY_SORT_* flags; see below. */
 	unsigned int		flags;
 
-	/* Cache a folio here for faster scanning for pivots */
-	struct folio		*folio;
-
-	/* First array index in folio that is completely readable */
-	xfarray_idx_t		first_folio_idx;
-
-	/* Last array index in folio that is completely readable */
-	xfarray_idx_t		last_folio_idx;
+	/* Cache a page here for faster access. */
+	struct xfile_page	xfpage;
+	void			*page_kaddr;
 
 #ifdef DEBUG
 	/* Performance statistics. */

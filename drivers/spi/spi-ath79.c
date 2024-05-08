@@ -189,7 +189,7 @@ static int ath79_spi_probe(struct platform_device *pdev)
 	host->num_chipselect = 3;
 	host->mem_ops = &ath79_mem_ops;
 
-	sp->bitbang.ctlr = host;
+	sp->bitbang.master = host;
 	sp->bitbang.chipselect = ath79_spi_chipselect;
 	sp->bitbang.txrx_word[SPI_MODE_0] = ath79_spi_txrx_mode0;
 	sp->bitbang.flags = SPI_CS_HIGH;
@@ -237,7 +237,7 @@ static void ath79_spi_remove(struct platform_device *pdev)
 
 	spi_bitbang_stop(&sp->bitbang);
 	ath79_spi_disable(sp);
-	spi_controller_put(sp->bitbang.ctlr);
+	spi_controller_put(sp->bitbang.master);
 }
 
 static void ath79_spi_shutdown(struct platform_device *pdev)

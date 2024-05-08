@@ -221,7 +221,7 @@ static inline void _tg3_flag_clear(enum TG3_FLAGS flag, unsigned long *bits)
 #define FIRMWARE_TG3TSO		"tigon/tg3_tso.bin"
 #define FIRMWARE_TG3TSO5	"tigon/tg3_tso5.bin"
 
-MODULE_AUTHOR("David S. Miller <davem@redhat.com> and Jeff Garzik <jgarzik@pobox.com>");
+MODULE_AUTHOR("David S. Miller (davem@redhat.com) and Jeff Garzik (jgarzik@pobox.com)");
 MODULE_DESCRIPTION("Broadcom Tigon3 ethernet driver");
 MODULE_LICENSE("GPL");
 MODULE_FIRMWARE(FIRMWARE_TG3);
@@ -2338,10 +2338,10 @@ static void tg3_phy_apply_otp(struct tg3 *tp)
 	tg3_phy_toggle_auxctl_smdsp(tp, false);
 }
 
-static void tg3_eee_pull_config(struct tg3 *tp, struct ethtool_keee *eee)
+static void tg3_eee_pull_config(struct tg3 *tp, struct ethtool_eee *eee)
 {
 	u32 val;
-	struct ethtool_keee *dest = &tp->eee;
+	struct ethtool_eee *dest = &tp->eee;
 
 	if (!(tp->phy_flags & TG3_PHYFLG_EEE_CAP))
 		return;
@@ -2362,13 +2362,13 @@ static void tg3_eee_pull_config(struct tg3 *tp, struct ethtool_keee *eee)
 	/* Pull lp advertised settings */
 	if (tg3_phy_cl45_read(tp, MDIO_MMD_AN, MDIO_AN_EEE_LPABLE, &val))
 		return;
-	mii_eee_cap1_mod_linkmode_t(dest->lp_advertised, val);
+	dest->lp_advertised = mmd_eee_adv_to_ethtool_adv_t(val);
 
 	/* Pull advertised and eee_enabled settings */
 	if (tg3_phy_cl45_read(tp, MDIO_MMD_AN, MDIO_AN_EEE_ADV, &val))
 		return;
 	dest->eee_enabled = !!val;
-	mii_eee_cap1_mod_linkmode_t(dest->advertised, val);
+	dest->advertised = mmd_eee_adv_to_ethtool_adv_t(val);
 
 	/* Pull tx_lpi_enabled */
 	val = tr32(TG3_CPMU_EEE_MODE);
@@ -4354,12 +4354,23 @@ static int tg3_phy_autoneg_cfg(struct tg3 *tp, u32 advertise, u32 flowctrl)
 	if (!err) {
 		u32 err2;
 
-		if (!tp->eee.eee_enabled)
-			val = 0;
-		else
-			val = ethtool_adv_to_mmd_eee_adv_t(advertise);
+		val = 0;
+		/* Advertise 100-BaseTX EEE ability */
+		if (advertise & ADVERTISED_100baseT_Full)
+			val |= MDIO_AN_EEE_ADV_100TX;
+		/* Advertise 1000-BaseT EEE ability */
+		if (advertise & ADVERTISED_1000baseT_Full)
+			val |= MDIO_AN_EEE_ADV_1000T;
 
-		mii_eee_cap1_mod_linkmode_t(tp->eee.advertised, val);
+		if (!tp->eee.eee_enabled) {
+			val = 0;
+			tp->eee.advertised = 0;
+		} else {
+			tp->eee.advertised = advertise &
+					     (ADVERTISED_100baseT_Full |
+					      ADVERTISED_1000baseT_Full);
+		}
+
 		err = tg3_phy_cl45_write(tp, MDIO_MMD_AN, MDIO_AN_EEE_ADV, val);
 		if (err)
 			val = 0;
@@ -4607,7 +4618,7 @@ static int tg3_init_5401phy_dsp(struct tg3 *tp)
 
 static bool tg3_phy_eee_config_ok(struct tg3 *tp)
 {
-	struct ethtool_keee eee = {};
+	struct ethtool_eee eee;
 
 	if (!(tp->phy_flags & TG3_PHYFLG_EEE_CAP))
 		return true;
@@ -4615,13 +4626,13 @@ static bool tg3_phy_eee_config_ok(struct tg3 *tp)
 	tg3_eee_pull_config(tp, &eee);
 
 	if (tp->eee.eee_enabled) {
-		if (!linkmode_equal(tp->eee.advertised, eee.advertised) ||
+		if (tp->eee.advertised != eee.advertised ||
 		    tp->eee.tx_lpi_timer != eee.tx_lpi_timer ||
 		    tp->eee.tx_lpi_enabled != eee.tx_lpi_enabled)
 			return false;
 	} else {
 		/* EEE is disabled but we're advertising */
-		if (!linkmode_empty(eee.advertised))
+		if (eee.advertised)
 			return false;
 	}
 
@@ -14169,7 +14180,7 @@ static int tg3_set_coalesce(struct net_device *dev,
 	return 0;
 }
 
-static int tg3_set_eee(struct net_device *dev, struct ethtool_keee *edata)
+static int tg3_set_eee(struct net_device *dev, struct ethtool_eee *edata)
 {
 	struct tg3 *tp = netdev_priv(dev);
 
@@ -14178,7 +14189,7 @@ static int tg3_set_eee(struct net_device *dev, struct ethtool_keee *edata)
 		return -EOPNOTSUPP;
 	}
 
-	if (!linkmode_equal(edata->advertised, tp->eee.advertised)) {
+	if (edata->advertised != tp->eee.advertised) {
 		netdev_warn(tp->dev,
 			    "Direct manipulation of EEE advertisement is not supported\n");
 		return -EINVAL;
@@ -14191,9 +14202,7 @@ static int tg3_set_eee(struct net_device *dev, struct ethtool_keee *edata)
 		return -EINVAL;
 	}
 
-	tp->eee.eee_enabled = edata->eee_enabled;
-	tp->eee.tx_lpi_enabled = edata->tx_lpi_enabled;
-	tp->eee.tx_lpi_timer = edata->tx_lpi_timer;
+	tp->eee = *edata;
 
 	tp->phy_flags |= TG3_PHYFLG_USER_CONFIGURED;
 	tg3_warn_mgmt_link_flap(tp);
@@ -14208,7 +14217,7 @@ static int tg3_set_eee(struct net_device *dev, struct ethtool_keee *edata)
 	return 0;
 }
 
-static int tg3_get_eee(struct net_device *dev, struct ethtool_keee *edata)
+static int tg3_get_eee(struct net_device *dev, struct ethtool_eee *edata)
 {
 	struct tg3 *tp = netdev_priv(dev);
 
@@ -15646,13 +15655,10 @@ static int tg3_phy_probe(struct tg3 *tp)
 	      tg3_chip_rev_id(tp) != CHIPREV_ID_57765_A0))) {
 		tp->phy_flags |= TG3_PHYFLG_EEE_CAP;
 
-		linkmode_zero(tp->eee.supported);
-		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
-				 tp->eee.supported);
-		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
-				 tp->eee.supported);
-		linkmode_copy(tp->eee.advertised, tp->eee.supported);
-
+		tp->eee.supported = SUPPORTED_100baseT_Full |
+				    SUPPORTED_1000baseT_Full;
+		tp->eee.advertised = ADVERTISED_100baseT_Full |
+				     ADVERTISED_1000baseT_Full;
 		tp->eee.eee_enabled = 1;
 		tp->eee.tx_lpi_enabled = 1;
 		tp->eee.tx_lpi_timer = TG3_CPMU_DBTMR1_LNKIDLE_2047US;

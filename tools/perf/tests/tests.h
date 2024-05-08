@@ -4,17 +4,11 @@
 
 #include <stdbool.h>
 
-enum {
-	TEST_OK   =  0,
-	TEST_FAIL = -1,
-	TEST_SKIP = -2,
-};
-
 #define TEST_ASSERT_VAL(text, cond)					 \
 do {									 \
 	if (!(cond)) {							 \
 		pr_debug("FAILED %s:%d %s\n", __FILE__, __LINE__, text); \
-		return TEST_FAIL;					 \
+		return -1;						 \
 	}								 \
 } while (0)
 
@@ -23,9 +17,15 @@ do {									 \
 	if (val != expected) {						 \
 		pr_debug("FAILED %s:%d %s (%d != %d)\n",		 \
 			 __FILE__, __LINE__, text, val, expected);	 \
-		return TEST_FAIL;						 \
+		return -1;						 \
 	}								 \
 } while (0)
+
+enum {
+	TEST_OK   =  0,
+	TEST_FAIL = -1,
+	TEST_SKIP = -2,
+};
 
 struct test_suite;
 

@@ -165,9 +165,14 @@ static ssize_t sysfs_read(struct device *dev, char *buf,
 {
 	struct axis_fifo *fifo = dev_get_drvdata(dev);
 	unsigned int read_val;
+	unsigned int len;
+	char tmp[32];
 
 	read_val = ioread32(fifo->base_addr + addr_offset);
-	return sysfs_emit(buf, "0x%x\n", read_val);
+	len =  snprintf(tmp, sizeof(tmp), "0x%x\n", read_val);
+	memcpy(buf, tmp, len);
+
+	return len;
 }
 
 static ssize_t isr_store(struct device *dev, struct device_attribute *attr,

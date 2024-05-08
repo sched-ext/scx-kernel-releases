@@ -96,7 +96,7 @@ static inline block_t free_segs_blk_count(struct f2fs_sb_info *sbi)
 	if (f2fs_sb_has_blkzoned(sbi))
 		return free_segs_blk_count_zoned(sbi);
 
-	return SEGS_TO_BLKS(sbi, free_segments(sbi));
+	return free_segments(sbi) << sbi->log_blocks_per_seg;
 }
 
 static inline block_t free_user_blocks(struct f2fs_sb_info *sbi)
@@ -104,7 +104,7 @@ static inline block_t free_user_blocks(struct f2fs_sb_info *sbi)
 	block_t free_blks, ovp_blks;
 
 	free_blks = free_segs_blk_count(sbi);
-	ovp_blks = SEGS_TO_BLKS(sbi, overprovision_segments(sbi));
+	ovp_blks = overprovision_segments(sbi) << sbi->log_blocks_per_seg;
 
 	if (free_blks < ovp_blks)
 		return 0;

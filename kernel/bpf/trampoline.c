@@ -456,9 +456,7 @@ again:
 	if (err < 0)
 		goto out_free;
 
-	err = arch_protect_bpf_trampoline(im->image, im->size);
-	if (err)
-		goto out_free;
+	arch_protect_bpf_trampoline(im->image, im->size);
 
 	WARN_ON(tr->cur_image && total == 0);
 	if (tr->cur_image)
@@ -1016,7 +1014,7 @@ void notrace __bpf_tramp_exit(struct bpf_tramp_image *tr)
 
 bpf_trampoline_enter_t bpf_trampoline_enter(const struct bpf_prog *prog)
 {
-	bool sleepable = prog->sleepable;
+	bool sleepable = prog->aux->sleepable;
 
 	if (bpf_prog_check_recur(prog))
 		return sleepable ? __bpf_prog_enter_sleepable_recur :
@@ -1031,7 +1029,7 @@ bpf_trampoline_enter_t bpf_trampoline_enter(const struct bpf_prog *prog)
 
 bpf_trampoline_exit_t bpf_trampoline_exit(const struct bpf_prog *prog)
 {
-	bool sleepable = prog->sleepable;
+	bool sleepable = prog->aux->sleepable;
 
 	if (bpf_prog_check_recur(prog))
 		return sleepable ? __bpf_prog_exit_sleepable_recur :
@@ -1074,10 +1072,17 @@ void __weak arch_free_bpf_trampoline(void *image, unsigned int size)
 	bpf_jit_free_exec(image);
 }
 
-int __weak arch_protect_bpf_trampoline(void *image, unsigned int size)
+void __weak arch_protect_bpf_trampoline(void *image, unsigned int size)
 {
 	WARN_ON_ONCE(size > PAGE_SIZE);
-	return set_memory_rox((long)image, 1);
+	set_memory_rox((long)image, 1);
+}
+
+void __weak arch_unprotect_bpf_trampoline(void *image, unsigned int size)
+{
+	WARN_ON_ONCE(size > PAGE_SIZE);
+	set_memory_nx((long)image, 1);
+	set_memory_rw((long)image, 1);
 }
 
 int __weak arch_bpf_trampoline_size(const struct btf_func_model *m, u32 flags,

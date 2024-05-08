@@ -143,8 +143,6 @@ allOf:
     then:
       required:
         - samsung,uart-fifosize
-      properties:
-        reg-io-width: false
 
 unevaluatedProperties: false
 

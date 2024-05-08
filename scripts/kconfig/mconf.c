@@ -19,7 +19,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include "list.h"
 #include "lkc.h"
 #include "lxdialog/dialog.h"
 #include "mnconf-common.h"
@@ -659,9 +658,9 @@ static void conf_choice(struct menu *menu)
 		dialog_clear();
 		res = dialog_checklist(prompt ? prompt : "Main Menu",
 					radiolist_instructions,
-					MENUBOX_HEIGHT_MIN,
+					MENUBOX_HEIGTH_MIN,
 					MENUBOX_WIDTH_MIN,
-					CHECKLIST_HEIGHT_MIN);
+					CHECKLIST_HEIGTH_MIN);
 		selected = item_activate_selected();
 		switch (res) {
 		case 0:

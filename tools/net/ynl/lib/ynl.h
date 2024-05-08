@@ -12,7 +12,6 @@ enum ynl_error_code {
 	YNL_ERROR_NONE = 0,
 	__YNL_ERRNO_END = 4096,
 	YNL_ERROR_INTERNAL,
-	YNL_ERROR_DUMP_INTER,
 	YNL_ERROR_EXPECT_ACK,
 	YNL_ERROR_EXPECT_MSG,
 	YNL_ERROR_UNEXPECT_MSG,
@@ -20,8 +19,6 @@ enum ynl_error_code {
 	YNL_ERROR_ATTR_INVALID,
 	YNL_ERROR_UNKNOWN_NTF,
 	YNL_ERROR_INV_RESP,
-	YNL_ERROR_INPUT_INVALID,
-	YNL_ERROR_INPUT_TOO_BIG,
 };
 
 /**
@@ -61,7 +58,7 @@ struct ynl_sock {
 
 /* private: */
 	const struct ynl_family *family;
-	int socket;
+	struct mnl_socket *sock;
 	__u32 seq;
 	__u32 portid;
 	__u16 family_id;

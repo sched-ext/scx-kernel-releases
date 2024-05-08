@@ -455,7 +455,6 @@ static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 	if (IS_ERR(victim))
 		return PTR_ERR(victim);
 
-	dir = d_inode(path.dentry);
 	if (victim->d_sb->s_fs_info != c) {
 		ret = -EXDEV;
 		goto err;
@@ -464,13 +463,14 @@ static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 		ret = -ENOENT;
 		goto err;
 	}
+	dir = d_inode(path.dentry);
 	ret = __bch2_unlink(dir, victim, true);
 	if (!ret) {
 		fsnotify_rmdir(dir, victim);
 		d_delete(victim);
 	}
-err:
 	inode_unlock(dir);
+err:
 	dput(victim);
 	path_put(&path);
 	return ret;

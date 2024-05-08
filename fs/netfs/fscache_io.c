@@ -83,10 +83,8 @@ static int fscache_begin_operation(struct netfs_cache_resources *cres,
 	cres->debug_id		= cookie->debug_id;
 	cres->inval_counter	= cookie->inval_counter;
 
-	if (!fscache_begin_cookie_access(cookie, why)) {
-		cres->cache_priv = NULL;
+	if (!fscache_begin_cookie_access(cookie, why))
 		return -ENOBUFS;
-	}
 
 again:
 	spin_lock(&cookie->lock);

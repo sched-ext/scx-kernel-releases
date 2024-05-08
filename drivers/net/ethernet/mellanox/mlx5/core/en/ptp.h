@@ -95,15 +95,9 @@ static inline void mlx5e_ptp_metadata_fifo_push(struct mlx5e_ptp_metadata_fifo *
 }
 
 static inline u8
-mlx5e_ptp_metadata_fifo_peek(struct mlx5e_ptp_metadata_fifo *fifo)
-{
-	return fifo->data[fifo->mask & fifo->cc];
-}
-
-static inline void
 mlx5e_ptp_metadata_fifo_pop(struct mlx5e_ptp_metadata_fifo *fifo)
 {
-	fifo->cc++;
+	return fifo->data[fifo->mask & fifo->cc++];
 }
 
 static inline void

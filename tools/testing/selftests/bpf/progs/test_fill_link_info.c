@@ -33,12 +33,6 @@ int BPF_PROG(tp_run)
 	return 0;
 }
 
-SEC("perf_event")
-int event_run(void *ctx)
-{
-	return 0;
-}
-
 SEC("kprobe.multi")
 int BPF_PROG(kmulti_run)
 {

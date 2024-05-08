@@ -12,12 +12,17 @@ extern "C" {
 
 #include <assert.h>
 #include <stdio.h>
-#include "list_types.h"
+#include "list.h"
 #ifndef __cplusplus
 #include <stdbool.h>
 #endif
 
-#include "list_types.h"
+struct file {
+	struct file *next;
+	struct file *parent;
+	const char *name;
+	int lineno;
+};
 
 typedef enum tristate {
 	no, mod, yes
@@ -76,8 +81,8 @@ enum {
  * SYMBOL_CHOICE bit set in 'flags'.
  */
 struct symbol {
-	/* link node for the hash table */
-	struct hlist_node node;
+	/* The next symbol in the same bucket in the symbol hash table */
+	struct symbol *next;
 
 	/* The name of the symbol, e.g. "FOO" for 'config FOO' */
 	char *name;
@@ -108,9 +113,6 @@ struct symbol {
 	 */
 	tristate visible;
 
-	/* config entries associated with this symbol */
-	struct list_head menus;
-
 	/* SYMBOL_* flags */
 	int flags;
 
@@ -128,6 +130,8 @@ struct symbol {
 	 */
 	struct expr_value implied;
 };
+
+#define for_all_symbols(i, sym) for (i = 0; i < SYMBOL_HASHSIZE; i++) for (sym = symbol_hash[i]; sym; sym = sym->next)
 
 #define SYMBOL_CONST      0x0001  /* symbol is const */
 #define SYMBOL_CHECK      0x0008  /* used during dependency checking */
@@ -153,6 +157,7 @@ struct symbol {
 #define SYMBOL_NEED_SET_CHOICE_VALUES  0x100000
 
 #define SYMBOL_MAXLENGTH	256
+#define SYMBOL_HASHSIZE		9973
 
 /* A property represent the config options that can be associated
  * with a config "symbol".
@@ -190,7 +195,7 @@ struct property {
 	struct menu *menu;         /* the menu the property are associated with
 	                            * valid for: P_SELECT, P_RANGE, P_CHOICE,
 	                            * P_PROMPT, P_DEFAULT, P_MENU, P_COMMENT */
-	const char *filename;      /* what file was this property defined */
+	struct file *file;         /* what file was this property defined */
 	int lineno;                /* what lineno was this property defined */
 };
 
@@ -225,8 +230,6 @@ struct menu {
 	 */
 	struct symbol *sym;
 
-	struct list_head link;	/* link to symbol::menus */
-
 	/*
 	 * The prompt associated with the node. This holds the prompt for a
 	 * symbol as well as the text for a menu or comment, along with the
@@ -253,7 +256,7 @@ struct menu {
 	char *help;
 
 	/* The location where the menu node appears in the Kconfig files */
-	const char *filename;
+	struct file *file;
 	int lineno;
 
 	/* For use by front ends that need to store auxiliary data */
@@ -273,6 +276,10 @@ struct jump_key {
 	size_t offset;
 	struct menu *target;
 };
+
+extern struct file *file_list;
+extern struct file *current_file;
+struct file *lookup_file(const char *name);
 
 extern struct symbol symbol_yes, symbol_no, symbol_mod;
 extern struct symbol *modules_sym;

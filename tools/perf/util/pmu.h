@@ -10,8 +10,6 @@
 #include <stdio.h>
 #include "parse-events.h"
 #include "pmu-events/pmu-events.h"
-#include "map_symbol.h"
-#include "mem-events.h"
 
 struct evsel_config_term;
 struct perf_cpu_map;
@@ -164,11 +162,6 @@ struct perf_pmu {
 		 */
 		bool exclude_guest;
 	} missing_features;
-
-	/**
-	 * @mem_events: List of the supported mem events
-	 */
-	struct perf_mem_event *mem_events;
 };
 
 /** @perf_pmu__fake: A special global PMU used for testing. */

@@ -30,7 +30,6 @@
 
 #include <linux/types.h>
 #include <linux/slab.h>
-#include <asm/dma-types.h>
 #include <asm/debug.h>
 
 /*
@@ -77,7 +76,7 @@
  * and iucv_message_reply if IUCV_IPBUFLST or IUCV_IPANSLST are used.
  */
 struct iucv_array {
-	dma32_t address;
+	u32 address;
 	u32 length;
 } __attribute__ ((aligned (8)));
 

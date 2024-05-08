@@ -30,23 +30,16 @@ struct xe_sched_job {
 	struct dma_fence *fence;
 	/** @user_fence: write back value when BB is complete */
 	struct {
-		/** @user_fence.used: user fence is used */
+		/** @used: user fence is used */
 		bool used;
-		/** @user_fence.addr: address to write to */
+		/** @addr: address to write to */
 		u64 addr;
-		/** @user_fence.value: write back value */
+		/** @value: write back value */
 		u64 value;
 	} user_fence;
 	/** @migrate_flush_flags: Additional flush flags for migration jobs */
 	u32 migrate_flush_flags;
-	/** @ring_ops_flush_tlb: The ring ops need to flush TLB before payload. */
-	bool ring_ops_flush_tlb;
 	/** @batch_addr: batch buffer address of job */
-	u64 batch_addr[];
-};
-
-struct xe_sched_job_snapshot {
-	u16 batch_addr_len;
 	u64 batch_addr[];
 };
 

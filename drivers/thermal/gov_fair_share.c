@@ -18,24 +18,22 @@
 static int get_trip_level(struct thermal_zone_device *tz)
 {
 	const struct thermal_trip *trip, *level_trip = NULL;
-	int trip_level = -1;
+	int trip_level;
 
 	for_each_trip(tz, trip) {
 		if (trip->temperature >= tz->temperature)
-			continue;
+			break;
 
-		trip_level++;
-
-		if (!level_trip || trip->temperature > level_trip->temperature)
-			level_trip = trip;
+		level_trip = trip;
 	}
 
 	/*  Bail out if the temperature is not greater than any trips. */
-	if (trip_level < 0)
+	if (!level_trip)
 		return 0;
 
-	trace_thermal_zone_trip(tz, thermal_zone_trip_id(tz, level_trip),
-				level_trip->type);
+	trip_level = thermal_zone_trip_id(tz, level_trip);
+
+	trace_thermal_zone_trip(tz, trip_level, level_trip->type);
 
 	return trip_level;
 }

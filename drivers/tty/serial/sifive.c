@@ -412,8 +412,7 @@ static void __ssp_receive_chars(struct sifive_serial_port *ssp)
 			break;
 
 		ssp->port.icount.rx++;
-		if (!uart_prepare_sysrq_char(&ssp->port, ch))
-			uart_insert_char(&ssp->port, 0, 0, ch, TTY_NORMAL);
+		uart_insert_char(&ssp->port, 0, 0, ch, TTY_NORMAL);
 	}
 
 	tty_flip_buffer_push(&ssp->port.state->port);
@@ -535,7 +534,7 @@ static irqreturn_t sifive_serial_irq(int irq, void *dev_id)
 	if (ip & SIFIVE_SERIAL_IP_TXWM_MASK)
 		__ssp_transmit_chars(ssp);
 
-	uart_unlock_and_check_sysrq(&ssp->port);
+	uart_port_unlock(&ssp->port);
 
 	return IRQ_HANDLED;
 }
@@ -792,10 +791,13 @@ static void sifive_serial_console_write(struct console *co, const char *s,
 	if (!ssp)
 		return;
 
-	if (oops_in_progress)
-		locked = uart_port_trylock_irqsave(&ssp->port, &flags);
+	local_irq_save(flags);
+	if (ssp->port.sysrq)
+		locked = 0;
+	else if (oops_in_progress)
+		locked = uart_port_trylock(&ssp->port);
 	else
-		uart_port_lock_irqsave(&ssp->port, &flags);
+		uart_port_lock(&ssp->port);
 
 	ier = __ssp_readl(ssp, SIFIVE_SERIAL_IE_OFFS);
 	__ssp_writel(0, SIFIVE_SERIAL_IE_OFFS, ssp);
@@ -805,7 +807,8 @@ static void sifive_serial_console_write(struct console *co, const char *s,
 	__ssp_writel(ier, SIFIVE_SERIAL_IE_OFFS, ssp);
 
 	if (locked)
-		uart_port_unlock_irqrestore(&ssp->port, flags);
+		uart_port_unlock(&ssp->port);
+	local_irq_restore(flags);
 }
 
 static int sifive_serial_console_setup(struct console *co, char *options)

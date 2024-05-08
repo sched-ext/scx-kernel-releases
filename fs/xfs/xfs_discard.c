@@ -8,7 +8,6 @@
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
-#include "xfs_trans.h"
 #include "xfs_mount.h"
 #include "xfs_btree.h"
 #include "xfs_alloc_btree.h"
@@ -19,7 +18,6 @@
 #include "xfs_trace.h"
 #include "xfs_log.h"
 #include "xfs_ag.h"
-#include "xfs_health.h"
 
 /*
  * Notes on an efficient, low latency fstrim algorithm
@@ -81,7 +79,7 @@ xfs_discard_endio_work(
 		container_of(work, struct xfs_busy_extents, endio_work);
 
 	xfs_extent_busy_clear(extents->mount, &extents->extent_list, false);
-	kfree(extents->owner);
+	kmem_free(extents->owner);
 }
 
 /*
@@ -122,7 +120,7 @@ xfs_discard_extents(
 		error = __blkdev_issue_discard(mp->m_ddev_targp->bt_bdev,
 				XFS_AGB_TO_DADDR(mp, busyp->agno, busyp->bno),
 				XFS_FSB_TO_BB(mp, busyp->length),
-				GFP_KERNEL, &bio);
+				GFP_NOFS, &bio);
 		if (error && error != -EOPNOTSUPP) {
 			xfs_info(mp,
 	 "discard failed for extent [0x%llx,%u], error %d",
@@ -157,7 +155,6 @@ xfs_trim_gather_extents(
 	uint64_t		*blocks_trimmed)
 {
 	struct xfs_mount	*mp = pag->pag_mount;
-	struct xfs_trans	*tp;
 	struct xfs_btree_cur	*cur;
 	struct xfs_buf		*agbp;
 	int			error;
@@ -171,15 +168,11 @@ xfs_trim_gather_extents(
 	 */
 	xfs_log_force(mp, XFS_LOG_SYNC);
 
-	error = xfs_trans_alloc_empty(mp, &tp);
+	error = xfs_alloc_read_agf(pag, NULL, 0, &agbp);
 	if (error)
 		return error;
 
-	error = xfs_alloc_read_agf(pag, tp, 0, &agbp);
-	if (error)
-		goto out_trans_cancel;
-
-	cur = xfs_cntbt_init_cursor(mp, tp, agbp, pag);
+	cur = xfs_allocbt_init_cursor(mp, NULL, agbp, pag, XFS_BTNUM_CNT);
 
 	/*
 	 * Look up the extent length requested in the AGF and start with it.
@@ -211,7 +204,6 @@ xfs_trim_gather_extents(
 		if (error)
 			break;
 		if (XFS_IS_CORRUPT(mp, i != 1)) {
-			xfs_btree_mark_sick(cur);
 			error = -EFSCORRUPTED;
 			break;
 		}
@@ -287,8 +279,7 @@ next_extent:
 		xfs_extent_busy_clear(mp, &extents->extent_list, false);
 out_del_cursor:
 	xfs_btree_del_cursor(cur, error);
-out_trans_cancel:
-	xfs_trans_cancel(tp);
+	xfs_buf_relse(agbp);
 	return error;
 }
 

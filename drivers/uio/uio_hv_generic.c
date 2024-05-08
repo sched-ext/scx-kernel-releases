@@ -181,14 +181,12 @@ hv_uio_cleanup(struct hv_device *dev, struct hv_uio_private_data *pdata)
 {
 	if (pdata->send_gpadl.gpadl_handle) {
 		vmbus_teardown_gpadl(dev->channel, &pdata->send_gpadl);
-		if (!pdata->send_gpadl.decrypted)
-			vfree(pdata->send_buf);
+		vfree(pdata->send_buf);
 	}
 
 	if (pdata->recv_gpadl.gpadl_handle) {
 		vmbus_teardown_gpadl(dev->channel, &pdata->recv_gpadl);
-		if (!pdata->recv_gpadl.decrypted)
-			vfree(pdata->recv_buf);
+		vfree(pdata->recv_buf);
 	}
 }
 
@@ -297,8 +295,7 @@ hv_uio_probe(struct hv_device *dev,
 	ret = vmbus_establish_gpadl(channel, pdata->recv_buf,
 				    RECV_BUFFER_SIZE, &pdata->recv_gpadl);
 	if (ret) {
-		if (!pdata->recv_gpadl.decrypted)
-			vfree(pdata->recv_buf);
+		vfree(pdata->recv_buf);
 		goto fail_close;
 	}
 
@@ -320,8 +317,7 @@ hv_uio_probe(struct hv_device *dev,
 	ret = vmbus_establish_gpadl(channel, pdata->send_buf,
 				    SEND_BUFFER_SIZE, &pdata->send_gpadl);
 	if (ret) {
-		if (!pdata->send_gpadl.decrypted)
-			vfree(pdata->send_buf);
+		vfree(pdata->send_buf);
 		goto fail_close;
 	}
 

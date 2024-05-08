@@ -109,13 +109,16 @@ struct ena_com_io_cq {
 	/* Interrupt unmask register */
 	u32 __iomem *unmask_reg;
 
+	/* The completion queue head doorbell register */
+	u32 __iomem *cq_head_db_reg;
+
 	/* numa configuration register (for TPH) */
 	u32 __iomem *numa_node_cfg_reg;
 
 	/* The value to write to the above register to unmask
 	 * the interrupt of this queue
 	 */
-	u32 msix_vector ____cacheline_aligned;
+	u32 msix_vector;
 
 	enum queue_direction direction;
 
@@ -131,6 +134,7 @@ struct ena_com_io_cq {
 	/* Device queue index */
 	u16 idx;
 	u16 head;
+	u16 last_head_update;
 	u8 phase;
 	u8 cdesc_entry_size_in_bytes;
 
@@ -154,6 +158,7 @@ struct ena_com_io_sq {
 	struct ena_com_io_desc_addr desc_addr;
 
 	u32 __iomem *db_addr;
+	u8 __iomem *header_addr;
 
 	enum queue_direction direction;
 	enum ena_admin_placement_policy_type mem_queue_type;

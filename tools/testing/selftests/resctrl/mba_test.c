@@ -22,9 +22,7 @@
  * con_mon grp, mon_grp in resctrl FS.
  * For each allocation, run 5 times in order to get average values.
  */
-static int mba_setup(const struct resctrl_test *test,
-		     const struct user_params *uparams,
-		     struct resctrl_val_param *p)
+static int mba_setup(struct resctrl_val_param *p)
 {
 	static int runs_per_allocation, allocation = 100;
 	char allocation_str[64];
@@ -42,7 +40,8 @@ static int mba_setup(const struct resctrl_test *test,
 
 	sprintf(allocation_str, "%d", allocation);
 
-	ret = write_schemata(p->ctrlgrp, allocation_str, uparams->cpu, test->resource);
+	ret = write_schemata(p->ctrlgrp, allocation_str, p->cpu_no,
+			     p->resctrl_val);
 	if (ret < 0)
 		return ret;
 
@@ -110,9 +109,9 @@ static int check_results(void)
 
 	fp = fopen(output, "r");
 	if (!fp) {
-		ksft_perror(output);
+		perror(output);
 
-		return -1;
+		return errno;
 	}
 
 	runs = 0;
@@ -142,12 +141,13 @@ void mba_test_cleanup(void)
 	remove(RESULT_FILE_NAME);
 }
 
-static int mba_run_test(const struct resctrl_test *test, const struct user_params *uparams)
+int mba_schemata_change(int cpu_no, const char * const *benchmark_cmd)
 {
 	struct resctrl_val_param param = {
 		.resctrl_val	= MBA_STR,
 		.ctrlgrp	= "c1",
 		.mongrp		= "m1",
+		.cpu_no		= cpu_no,
 		.filename	= RESULT_FILE_NAME,
 		.bw_report	= "reads",
 		.setup		= mba_setup
@@ -156,7 +156,7 @@ static int mba_run_test(const struct resctrl_test *test, const struct user_param
 
 	remove(RESULT_FILE_NAME);
 
-	ret = resctrl_val(test, uparams, uparams->benchmark_cmd, &param);
+	ret = resctrl_val(benchmark_cmd, &param);
 	if (ret)
 		goto out;
 
@@ -167,17 +167,3 @@ out:
 
 	return ret;
 }
-
-static bool mba_feature_check(const struct resctrl_test *test)
-{
-	return test_resource_feature_check(test) &&
-	       resctrl_mon_feature_exists("L3_MON", "mbm_local_bytes");
-}
-
-struct resctrl_test mba_test = {
-	.name = "MBA",
-	.resource = "MB",
-	.vendor_specific = ARCH_INTEL,
-	.feature_check = mba_feature_check,
-	.run_test = mba_run_test,
-};

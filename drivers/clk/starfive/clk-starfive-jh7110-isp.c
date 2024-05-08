@@ -202,10 +202,12 @@ err_exit:
 	return ret;
 }
 
-static void jh7110_ispcrg_remove(struct platform_device *pdev)
+static int jh7110_ispcrg_remove(struct platform_device *pdev)
 {
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
+
+	return 0;
 }
 
 static const struct of_device_id jh7110_ispcrg_match[] = {
@@ -216,7 +218,7 @@ MODULE_DEVICE_TABLE(of, jh7110_ispcrg_match);
 
 static struct platform_driver jh7110_ispcrg_driver = {
 	.probe = jh7110_ispcrg_probe,
-	.remove_new = jh7110_ispcrg_remove,
+	.remove = jh7110_ispcrg_remove,
 	.driver = {
 		.name = "clk-starfive-jh7110-isp",
 		.of_match_table = jh7110_ispcrg_match,

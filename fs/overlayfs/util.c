@@ -774,14 +774,13 @@ bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
 			 const struct path *upperpath)
 {
 	bool set = false;
-	uuid_t uuid;
 	int res;
 
 	/* Try to load existing persistent uuid */
-	res = ovl_path_getxattr(ofs, upperpath, OVL_XATTR_UUID, uuid.b,
+	res = ovl_path_getxattr(ofs, upperpath, OVL_XATTR_UUID, sb->s_uuid.b,
 				UUID_SIZE);
 	if (res == UUID_SIZE)
-		goto set_uuid;
+		return true;
 
 	if (res != -ENODATA)
 		goto fail;
@@ -809,20 +808,17 @@ bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
 	}
 
 	/* Generate overlay instance uuid */
-	uuid_gen(&uuid);
+	uuid_gen(&sb->s_uuid);
 
 	/* Try to store persistent uuid */
 	set = true;
-	res = ovl_setxattr(ofs, upperpath->dentry, OVL_XATTR_UUID, uuid.b,
+	res = ovl_setxattr(ofs, upperpath->dentry, OVL_XATTR_UUID, sb->s_uuid.b,
 			   UUID_SIZE);
-	if (res)
-		goto fail;
-
-set_uuid:
-	super_set_uuid(sb, uuid.b, sizeof(uuid));
-	return true;
+	if (res == 0)
+		return true;
 
 fail:
+	memset(sb->s_uuid.b, 0, UUID_SIZE);
 	ofs->config.uuid = OVL_UUID_NULL;
 	pr_warn("failed to %s uuid (%pd2, err=%i); falling back to uuid=null.\n",
 		set ? "set" : "get", upperpath->dentry, res);

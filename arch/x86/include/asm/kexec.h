@@ -25,6 +25,7 @@
 
 #include <asm/page.h>
 #include <asm/ptrace.h>
+#include <asm/bootparam.h>
 
 struct kimage;
 

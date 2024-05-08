@@ -30,6 +30,8 @@
 #include <asm/mpc85xx.h>
 #include <sysdev/fsl_soc.h>
 
+#define DRV_NAME "mpc-i2c"
+
 #define MPC_I2C_CLOCK_LEGACY   0
 #define MPC_I2C_CLOCK_PRESERVE (~0U)
 
@@ -842,14 +844,14 @@ static int fsl_i2c_probe(struct platform_device *op)
 			mpc_i2c_setup_8xxx(op->dev.of_node, i2c, clock);
 	}
 
-	/* Sadly, we have to support two deprecated bindings here */
+	/*
+	 * "fsl,timeout" has been marked as deprecated and, to maintain
+	 * backward compatibility, we will only look for it if
+	 * "i2c-scl-clk-low-timeout-us" is not present.
+	 */
 	result = of_property_read_u32(op->dev.of_node,
-				      "i2c-transfer-timeout-us",
+				      "i2c-scl-clk-low-timeout-us",
 				      &mpc_ops.timeout);
-	if (result == -EINVAL)
-		result = of_property_read_u32(op->dev.of_node,
-					      "i2c-scl-clk-low-timeout-us",
-					      &mpc_ops.timeout);
 	if (result == -EINVAL)
 		result = of_property_read_u32(op->dev.of_node,
 					      "fsl,timeout", &mpc_ops.timeout);
@@ -958,7 +960,7 @@ static struct platform_driver mpc_i2c_driver = {
 	.probe		= fsl_i2c_probe,
 	.remove_new	= fsl_i2c_remove,
 	.driver = {
-		.name = "mpc-i2c",
+		.name = DRV_NAME,
 		.of_match_table = mpc_i2c_of_match,
 		.pm = &mpc_i2c_pm_ops,
 	},

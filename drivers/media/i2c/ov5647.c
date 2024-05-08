@@ -1363,7 +1363,7 @@ static int ov5647_parse_dt(struct ov5647 *sensor, struct device_node *np)
 	struct device_node *ep;
 	int ret;
 
-	ep = of_graph_get_endpoint_by_regs(np, 0, -1);
+	ep = of_graph_get_next_endpoint(np, NULL);
 	if (!ep)
 		return -EINVAL;
 

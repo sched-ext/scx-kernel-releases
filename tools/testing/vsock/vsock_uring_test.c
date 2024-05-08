@@ -66,7 +66,7 @@ static void vsock_io_uring_client(const struct test_opts *opts,
 	struct msghdr msg;
 	int fd;
 
-	fd = vsock_stream_connect(opts->peer_cid, opts->peer_port);
+	fd = vsock_stream_connect(opts->peer_cid, 1234);
 	if (fd < 0) {
 		perror("connect");
 		exit(EXIT_FAILURE);
@@ -120,7 +120,7 @@ static void vsock_io_uring_server(const struct test_opts *opts,
 	void *data;
 	int fd;
 
-	fd = vsock_stream_accept(VMADDR_CID_ANY, opts->peer_port, NULL);
+	fd = vsock_stream_accept(VMADDR_CID_ANY, 1234, NULL);
 	if (fd < 0) {
 		perror("accept");
 		exit(EXIT_FAILURE);
@@ -248,11 +248,6 @@ static const struct option longopts[] = {
 		.val = 'p',
 	},
 	{
-		.name = "peer-port",
-		.has_arg = required_argument,
-		.val = 'q',
-	},
-	{
 		.name = "help",
 		.has_arg = no_argument,
 		.val = '?',
@@ -262,7 +257,7 @@ static const struct option longopts[] = {
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: vsock_uring_test [--help] [--control-host=<host>] --control-port=<port> --mode=client|server --peer-cid=<cid> [--peer-port=<port>]\n"
+	fprintf(stderr, "Usage: vsock_uring_test [--help] [--control-host=<host>] --control-port=<port> --mode=client|server --peer-cid=<cid>\n"
 		"\n"
 		"  Server: vsock_uring_test --control-port=1234 --mode=server --peer-cid=3\n"
 		"  Client: vsock_uring_test --control-host=192.168.0.1 --control-port=1234 --mode=client --peer-cid=2\n"
@@ -276,8 +271,6 @@ static void usage(void)
 		"  --control-port <port>  Server port to listen on/connect to\n"
 		"  --mode client|server   Server or client mode\n"
 		"  --peer-cid <cid>       CID of the other side\n"
-		"  --peer-port <port>     AF_VSOCK port used for the test [default: %d]\n",
-		DEFAULT_PEER_PORT
 		);
 	exit(EXIT_FAILURE);
 }
@@ -289,7 +282,6 @@ int main(int argc, char **argv)
 	struct test_opts opts = {
 		.mode = TEST_MODE_UNSET,
 		.peer_cid = VMADDR_CID_ANY,
-		.peer_port = DEFAULT_PEER_PORT,
 	};
 
 	init_signals();
@@ -316,9 +308,6 @@ int main(int argc, char **argv)
 			break;
 		case 'p':
 			opts.peer_cid = parse_cid(optarg);
-			break;
-		case 'q':
-			opts.peer_port = parse_port(optarg);
 			break;
 		case 'P':
 			control_port = optarg;

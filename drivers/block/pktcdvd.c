@@ -340,8 +340,8 @@ static ssize_t device_map_show(const struct class *c, const struct class_attribu
 		n += sysfs_emit_at(data, n, "%s %u:%u %u:%u\n",
 			pd->disk->disk_name,
 			MAJOR(pd->pkt_dev), MINOR(pd->pkt_dev),
-			MAJOR(file_bdev(pd->bdev_file)->bd_dev),
-			MINOR(file_bdev(pd->bdev_file)->bd_dev));
+			MAJOR(pd->bdev_handle->bdev->bd_dev),
+			MINOR(pd->bdev_handle->bdev->bd_dev));
 	}
 	mutex_unlock(&ctl_mutex);
 	return n;
@@ -438,7 +438,7 @@ static int pkt_seq_show(struct seq_file *m, void *p)
 	int states[PACKET_NUM_STATES];
 
 	seq_printf(m, "Writer %s mapped to %pg:\n", pd->disk->disk_name,
-		   file_bdev(pd->bdev_file));
+		   pd->bdev_handle->bdev);
 
 	seq_printf(m, "\nSettings:\n");
 	seq_printf(m, "\tpacket size:\t\t%dkB\n", pd->settings.size / 2);
@@ -715,7 +715,7 @@ static void pkt_rbtree_insert(struct pktcdvd_device *pd, struct pkt_rb_node *nod
  */
 static int pkt_generic_packet(struct pktcdvd_device *pd, struct packet_command *cgc)
 {
-	struct request_queue *q = bdev_get_queue(file_bdev(pd->bdev_file));
+	struct request_queue *q = bdev_get_queue(pd->bdev_handle->bdev);
 	struct scsi_cmnd *scmd;
 	struct request *rq;
 	int ret = 0;
@@ -828,12 +828,6 @@ static noinline_for_stack int pkt_set_speed(struct pktcdvd_device *pd,
  */
 static void pkt_queue_bio(struct pktcdvd_device *pd, struct bio *bio)
 {
-	/*
-	 * Some CDRW drives can not handle writes larger than one packet,
-	 * even if the size is a multiple of the packet size.
-	 */
-	bio->bi_opf |= REQ_NOMERGE;
-
 	spin_lock(&pd->iosched.lock);
 	if (bio_data_dir(bio) == READ)
 		bio_list_add(&pd->iosched.read_queue, bio);
@@ -1054,7 +1048,7 @@ static void pkt_gather_data(struct pktcdvd_device *pd, struct packet_data *pkt)
 			continue;
 
 		bio = pkt->r_bios[f];
-		bio_init(bio, file_bdev(pd->bdev_file), bio->bi_inline_vecs, 1,
+		bio_init(bio, pd->bdev_handle->bdev, bio->bi_inline_vecs, 1,
 			 REQ_OP_READ);
 		bio->bi_iter.bi_sector = pkt->sector + f * (CD_FRAMESIZE >> 9);
 		bio->bi_end_io = pkt_end_io_read;
@@ -1270,7 +1264,7 @@ static void pkt_start_write(struct pktcdvd_device *pd, struct packet_data *pkt)
 	struct device *ddev = disk_to_dev(pd->disk);
 	int f;
 
-	bio_init(pkt->w_bio, file_bdev(pd->bdev_file), pkt->w_bio->bi_inline_vecs,
+	bio_init(pkt->w_bio, pd->bdev_handle->bdev, pkt->w_bio->bi_inline_vecs,
 		 pkt->frames, REQ_OP_WRITE);
 	pkt->w_bio->bi_iter.bi_sector = pkt->sector;
 	pkt->w_bio->bi_end_io = pkt_end_io_packet_write;
@@ -2168,20 +2162,20 @@ static int pkt_open_dev(struct pktcdvd_device *pd, bool write)
 	int ret;
 	long lba;
 	struct request_queue *q;
-	struct file *bdev_file;
+	struct bdev_handle *bdev_handle;
 
 	/*
 	 * We need to re-open the cdrom device without O_NONBLOCK to be able
 	 * to read/write from/to it. It is already opened in O_NONBLOCK mode
 	 * so open should not fail.
 	 */
-	bdev_file = bdev_file_open_by_dev(file_bdev(pd->bdev_file)->bd_dev,
+	bdev_handle = bdev_open_by_dev(pd->bdev_handle->bdev->bd_dev,
 				       BLK_OPEN_READ, pd, NULL);
-	if (IS_ERR(bdev_file)) {
-		ret = PTR_ERR(bdev_file);
+	if (IS_ERR(bdev_handle)) {
+		ret = PTR_ERR(bdev_handle);
 		goto out;
 	}
-	pd->f_open_bdev = bdev_file;
+	pd->open_bdev_handle = bdev_handle;
 
 	ret = pkt_get_last_written(pd, &lba);
 	if (ret) {
@@ -2190,13 +2184,18 @@ static int pkt_open_dev(struct pktcdvd_device *pd, bool write)
 	}
 
 	set_capacity(pd->disk, lba << 2);
-	set_capacity_and_notify(file_bdev(pd->bdev_file)->bd_disk, lba << 2);
+	set_capacity_and_notify(pd->bdev_handle->bdev->bd_disk, lba << 2);
 
-	q = bdev_get_queue(file_bdev(pd->bdev_file));
+	q = bdev_get_queue(pd->bdev_handle->bdev);
 	if (write) {
 		ret = pkt_open_write(pd);
 		if (ret)
 			goto out_putdev;
+		/*
+		 * Some CDRW drives can not handle writes larger than one packet,
+		 * even if the size is a multiple of the packet size.
+		 */
+		blk_queue_max_hw_sectors(q, pd->settings.size);
 		set_bit(PACKET_WRITABLE, &pd->flags);
 	} else {
 		pkt_set_speed(pd, MAX_SPEED, MAX_SPEED);
@@ -2219,7 +2218,7 @@ static int pkt_open_dev(struct pktcdvd_device *pd, bool write)
 	return 0;
 
 out_putdev:
-	fput(bdev_file);
+	bdev_release(bdev_handle);
 out:
 	return ret;
 }
@@ -2238,8 +2237,8 @@ static void pkt_release_dev(struct pktcdvd_device *pd, int flush)
 	pkt_lock_door(pd, 0);
 
 	pkt_set_speed(pd, MAX_SPEED, MAX_SPEED);
-	fput(pd->f_open_bdev);
-	pd->f_open_bdev = NULL;
+	bdev_release(pd->open_bdev_handle);
+	pd->open_bdev_handle = NULL;
 
 	pkt_shrink_pktlist(pd);
 }
@@ -2327,7 +2326,7 @@ static void pkt_end_io_read_cloned(struct bio *bio)
 
 static void pkt_make_request_read(struct pktcdvd_device *pd, struct bio *bio)
 {
-	struct bio *cloned_bio = bio_alloc_clone(file_bdev(pd->bdev_file), bio,
+	struct bio *cloned_bio = bio_alloc_clone(pd->bdev_handle->bdev, bio,
 		GFP_NOIO, &pkt_bio_set);
 	struct packet_stacked_data *psd = mempool_alloc(&psd_pool, GFP_NOIO);
 
@@ -2339,9 +2338,9 @@ static void pkt_make_request_read(struct pktcdvd_device *pd, struct bio *bio)
 	pkt_queue_bio(pd, cloned_bio);
 }
 
-static void pkt_make_request_write(struct bio *bio)
+static void pkt_make_request_write(struct request_queue *q, struct bio *bio)
 {
-	struct pktcdvd_device *pd = bio->bi_bdev->bd_disk->private_data;
+	struct pktcdvd_device *pd = q->queuedata;
 	sector_t zone;
 	struct packet_data *pkt;
 	int was_empty, blocked_bio;
@@ -2433,7 +2432,7 @@ static void pkt_make_request_write(struct bio *bio)
 
 static void pkt_submit_bio(struct bio *bio)
 {
-	struct pktcdvd_device *pd = bio->bi_bdev->bd_disk->private_data;
+	struct pktcdvd_device *pd = bio->bi_bdev->bd_disk->queue->queuedata;
 	struct device *ddev = disk_to_dev(pd->disk);
 	struct bio *split;
 
@@ -2477,7 +2476,7 @@ static void pkt_submit_bio(struct bio *bio)
 			split = bio;
 		}
 
-		pkt_make_request_write(split);
+		pkt_make_request_write(bio->bi_bdev->bd_disk->queue, split);
 	} while (split != bio);
 
 	return;
@@ -2485,11 +2484,20 @@ end_io:
 	bio_io_error(bio);
 }
 
+static void pkt_init_queue(struct pktcdvd_device *pd)
+{
+	struct request_queue *q = pd->disk->queue;
+
+	blk_queue_logical_block_size(q, CD_FRAMESIZE);
+	blk_queue_max_hw_sectors(q, PACKET_MAX_SECTORS);
+	q->queuedata = pd;
+}
+
 static int pkt_new_dev(struct pktcdvd_device *pd, dev_t dev)
 {
 	struct device *ddev = disk_to_dev(pd->disk);
 	int i;
-	struct file *bdev_file;
+	struct bdev_handle *bdev_handle;
 	struct scsi_device *sdev;
 
 	if (pd->pkt_dev == dev) {
@@ -2500,9 +2508,9 @@ static int pkt_new_dev(struct pktcdvd_device *pd, dev_t dev)
 		struct pktcdvd_device *pd2 = pkt_devs[i];
 		if (!pd2)
 			continue;
-		if (file_bdev(pd2->bdev_file)->bd_dev == dev) {
+		if (pd2->bdev_handle->bdev->bd_dev == dev) {
 			dev_err(ddev, "%pg already setup\n",
-				file_bdev(pd2->bdev_file));
+				pd2->bdev_handle->bdev);
 			return -EBUSY;
 		}
 		if (pd2->pkt_dev == dev) {
@@ -2511,13 +2519,13 @@ static int pkt_new_dev(struct pktcdvd_device *pd, dev_t dev)
 		}
 	}
 
-	bdev_file = bdev_file_open_by_dev(dev, BLK_OPEN_READ | BLK_OPEN_NDELAY,
+	bdev_handle = bdev_open_by_dev(dev, BLK_OPEN_READ | BLK_OPEN_NDELAY,
 				       NULL, NULL);
-	if (IS_ERR(bdev_file))
-		return PTR_ERR(bdev_file);
-	sdev = scsi_device_from_queue(file_bdev(bdev_file)->bd_disk->queue);
+	if (IS_ERR(bdev_handle))
+		return PTR_ERR(bdev_handle);
+	sdev = scsi_device_from_queue(bdev_handle->bdev->bd_disk->queue);
 	if (!sdev) {
-		fput(bdev_file);
+		bdev_release(bdev_handle);
 		return -EINVAL;
 	}
 	put_device(&sdev->sdev_gendev);
@@ -2525,8 +2533,10 @@ static int pkt_new_dev(struct pktcdvd_device *pd, dev_t dev)
 	/* This is safe, since we have a reference from open(). */
 	__module_get(THIS_MODULE);
 
-	pd->bdev_file = bdev_file;
-	set_blocksize(file_bdev(bdev_file), CD_FRAMESIZE);
+	pd->bdev_handle = bdev_handle;
+	set_blocksize(bdev_handle->bdev, CD_FRAMESIZE);
+
+	pkt_init_queue(pd);
 
 	atomic_set(&pd->cdrw.pending_bios, 0);
 	pd->cdrw.thread = kthread_run(kcdrwd, pd, "%s", pd->disk->disk_name);
@@ -2536,11 +2546,11 @@ static int pkt_new_dev(struct pktcdvd_device *pd, dev_t dev)
 	}
 
 	proc_create_single_data(pd->disk->disk_name, 0, pkt_proc, pkt_seq_show, pd);
-	dev_notice(ddev, "writer mapped to %pg\n", file_bdev(bdev_file));
+	dev_notice(ddev, "writer mapped to %pg\n", bdev_handle->bdev);
 	return 0;
 
 out_mem:
-	fput(bdev_file);
+	bdev_release(bdev_handle);
 	/* This is safe: open() is still holding a reference. */
 	module_put(THIS_MODULE);
 	return -ENOMEM;
@@ -2595,9 +2605,9 @@ static unsigned int pkt_check_events(struct gendisk *disk,
 
 	if (!pd)
 		return 0;
-	if (!pd->bdev_file)
+	if (!pd->bdev_handle)
 		return 0;
-	attached_disk = file_bdev(pd->bdev_file)->bd_disk;
+	attached_disk = pd->bdev_handle->bdev->bd_disk;
 	if (!attached_disk || !attached_disk->fops->check_events)
 		return 0;
 	return attached_disk->fops->check_events(attached_disk, clearing);
@@ -2624,10 +2634,6 @@ static const struct block_device_operations pktcdvd_ops = {
  */
 static int pkt_setup_dev(dev_t dev, dev_t* pkt_dev)
 {
-	struct queue_limits lim = {
-		.max_hw_sectors		= PACKET_MAX_SECTORS,
-		.logical_block_size	= CD_FRAMESIZE,
-	};
 	int idx;
 	int ret = -ENOMEM;
 	struct pktcdvd_device *pd;
@@ -2667,11 +2673,10 @@ static int pkt_setup_dev(dev_t dev, dev_t* pkt_dev)
 	pd->write_congestion_on  = write_congestion_on;
 	pd->write_congestion_off = write_congestion_off;
 
-	disk = blk_alloc_disk(&lim, NUMA_NO_NODE);
-	if (IS_ERR(disk)) {
-		ret = PTR_ERR(disk);
+	ret = -ENOMEM;
+	disk = blk_alloc_disk(NUMA_NO_NODE);
+	if (!disk)
 		goto out_mem;
-	}
 	pd->disk = disk;
 	disk->major = pktdev_major;
 	disk->first_minor = idx;
@@ -2687,7 +2692,7 @@ static int pkt_setup_dev(dev_t dev, dev_t* pkt_dev)
 		goto out_mem2;
 
 	/* inherit events of the host device */
-	disk->events = file_bdev(pd->bdev_file)->bd_disk->events;
+	disk->events = pd->bdev_handle->bdev->bd_disk->events;
 
 	ret = add_disk(disk);
 	if (ret)
@@ -2752,7 +2757,7 @@ static int pkt_remove_dev(dev_t pkt_dev)
 	pkt_debugfs_dev_remove(pd);
 	pkt_sysfs_dev_remove(pd);
 
-	fput(pd->bdev_file);
+	bdev_release(pd->bdev_handle);
 
 	remove_proc_entry(pd->disk->disk_name, pkt_proc);
 	dev_notice(ddev, "writer unmapped\n");
@@ -2779,7 +2784,7 @@ static void pkt_get_status(struct pkt_ctrl_command *ctrl_cmd)
 
 	pd = pkt_find_dev_from_minor(ctrl_cmd->dev_index);
 	if (pd) {
-		ctrl_cmd->dev = new_encode_dev(file_bdev(pd->bdev_file)->bd_dev);
+		ctrl_cmd->dev = new_encode_dev(pd->bdev_handle->bdev->bd_dev);
 		ctrl_cmd->pkt_dev = new_encode_dev(pd->pkt_dev);
 	} else {
 		ctrl_cmd->dev = 0;

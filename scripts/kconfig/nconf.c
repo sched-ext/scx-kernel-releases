@@ -11,7 +11,6 @@
 #include <strings.h>
 #include <stdlib.h>
 
-#include "list.h"
 #include "lkc.h"
 #include "mnconf-common.h"
 #include "nconf.h"

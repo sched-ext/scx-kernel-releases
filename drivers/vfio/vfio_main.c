@@ -16,7 +16,7 @@
 #include <linux/fs.h>
 #include <linux/idr.h>
 #include <linux/iommu.h>
-#if IS_ENABLED(CONFIG_KVM)
+#ifdef CONFIG_HAVE_KVM
 #include <linux/kvm_host.h>
 #endif
 #include <linux/list.h>
@@ -385,7 +385,7 @@ void vfio_unregister_group_dev(struct vfio_device *device)
 }
 EXPORT_SYMBOL_GPL(vfio_unregister_group_dev);
 
-#if IS_ENABLED(CONFIG_KVM)
+#ifdef CONFIG_HAVE_KVM
 void vfio_device_get_kvm_safe(struct vfio_device *device, struct kvm *kvm)
 {
 	void (*pfn)(struct kvm *kvm);

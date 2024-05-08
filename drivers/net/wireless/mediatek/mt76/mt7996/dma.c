@@ -237,8 +237,7 @@ void mt7996_dma_start(struct mt7996_dev *dev, bool reset, bool wed_reset)
 				 MT_WFDMA0_GLO_CFG_TX_DMA_EN |
 				 MT_WFDMA0_GLO_CFG_RX_DMA_EN |
 				 MT_WFDMA0_GLO_CFG_OMIT_TX_INFO |
-				 MT_WFDMA0_GLO_CFG_OMIT_RX_INFO_PFET2 |
-				 MT_WFDMA0_GLO_CFG_EXT_EN);
+				 MT_WFDMA0_GLO_CFG_OMIT_RX_INFO_PFET2);
 
 		if (dev->hif2)
 			mt76_set(dev, MT_WFDMA0_GLO_CFG + hif1_ofs,
@@ -695,7 +694,7 @@ void mt7996_dma_reset(struct mt7996_dev *dev, bool force)
 		mtk_wed_device_dma_reset(&dev->mt76.mmio.wed);
 
 	mt7996_dma_disable(dev, force);
-	mt76_wed_dma_reset(&dev->mt76);
+	mt76_dma_wed_reset(&dev->mt76);
 
 	/* reset hw queues */
 	for (i = 0; i < __MT_TXQ_MAX; i++) {

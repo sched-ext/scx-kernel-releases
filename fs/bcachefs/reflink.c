@@ -185,7 +185,8 @@ not_found:
 		} else {
 			bkey_error_init(update);
 			update->k.p		= p.k->p;
-			update->k.size		= p.k->size;
+			update->k.p.offset	= next_idx;
+			update->k.size		= next_idx - *idx;
 			set_bkey_val_u64s(&update->k, 0);
 		}
 

@@ -1495,11 +1495,17 @@ static __init int sctp_init(void)
 
 	/* Allocate bind_bucket and chunk caches. */
 	status = -ENOBUFS;
-	sctp_bucket_cachep = KMEM_CACHE(sctp_bind_bucket, SLAB_HWCACHE_ALIGN);
+	sctp_bucket_cachep = kmem_cache_create("sctp_bind_bucket",
+					       sizeof(struct sctp_bind_bucket),
+					       0, SLAB_HWCACHE_ALIGN,
+					       NULL);
 	if (!sctp_bucket_cachep)
 		goto out;
 
-	sctp_chunk_cachep = KMEM_CACHE(sctp_chunk, SLAB_HWCACHE_ALIGN);
+	sctp_chunk_cachep = kmem_cache_create("sctp_chunk",
+					       sizeof(struct sctp_chunk),
+					       0, SLAB_HWCACHE_ALIGN,
+					       NULL);
 	if (!sctp_chunk_cachep)
 		goto err_chunk_cachep;
 

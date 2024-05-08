@@ -25,7 +25,6 @@
 #include "xfs_refcount_btree.h"
 #include "xfs_error.h"
 #include "xfs_ag.h"
-#include "xfs_health.h"
 #include "scrub/xfs_scrub.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
@@ -38,7 +37,6 @@
 #include "scrub/xfarray.h"
 #include "scrub/newbt.h"
 #include "scrub/reap.h"
-#include "scrub/rcbag.h"
 
 /*
  * Rebuilding the Reference Count Btree
@@ -99,6 +97,12 @@
  * insert all the records.
  */
 
+/* The only parts of the rmap that we care about for computing refcounts. */
+struct xrep_refc_rmap {
+	xfs_agblock_t		startblock;
+	xfs_extlen_t		blockcount;
+} __packed;
+
 struct xrep_refc {
 	/* refcount extents */
 	struct xfarray		*refcount_records;
@@ -117,20 +121,6 @@ struct xrep_refc {
 	/* # of refcountbt blocks */
 	xfs_extlen_t		btblocks;
 };
-
-/* Set us up to repair refcount btrees. */
-int
-xrep_setup_ag_refcountbt(
-	struct xfs_scrub	*sc)
-{
-	char			*descr;
-	int			error;
-
-	descr = xchk_xfile_ag_descr(sc, "rmap record bag");
-	error = xrep_setup_xfbtree(sc, descr);
-	kfree(descr);
-	return error;
-}
 
 /* Check for any obvious conflicts with this shared/CoW staging extent. */
 STATIC int
@@ -233,9 +223,10 @@ xrep_refc_rmap_shareable(
 STATIC int
 xrep_refc_walk_rmaps(
 	struct xrep_refc	*rr,
-	struct xfs_rmap_irec	*rmap,
+	struct xrep_refc_rmap	*rrm,
 	bool			*have_rec)
 {
+	struct xfs_rmap_irec	rmap;
 	struct xfs_btree_cur	*cur = rr->sc->sa.rmap_cur;
 	struct xfs_mount	*mp = cur->bc_mp;
 	int			have_gt;
@@ -259,30 +250,29 @@ xrep_refc_walk_rmaps(
 		if (!have_gt)
 			return 0;
 
-		error = xfs_rmap_get_rec(cur, rmap, &have_gt);
+		error = xfs_rmap_get_rec(cur, &rmap, &have_gt);
 		if (error)
 			return error;
-		if (XFS_IS_CORRUPT(mp, !have_gt)) {
-			xfs_btree_mark_sick(cur);
+		if (XFS_IS_CORRUPT(mp, !have_gt))
 			return -EFSCORRUPTED;
-		}
 
-		if (rmap->rm_owner == XFS_RMAP_OWN_COW) {
-			error = xrep_refc_stash_cow(rr, rmap->rm_startblock,
-					rmap->rm_blockcount);
+		if (rmap.rm_owner == XFS_RMAP_OWN_COW) {
+			error = xrep_refc_stash_cow(rr, rmap.rm_startblock,
+					rmap.rm_blockcount);
 			if (error)
 				return error;
-		} else if (rmap->rm_owner == XFS_RMAP_OWN_REFC) {
+		} else if (rmap.rm_owner == XFS_RMAP_OWN_REFC) {
 			/* refcountbt block, dump it when we're done. */
-			rr->btblocks += rmap->rm_blockcount;
+			rr->btblocks += rmap.rm_blockcount;
 			error = xagb_bitmap_set(&rr->old_refcountbt_blocks,
-					rmap->rm_startblock,
-					rmap->rm_blockcount);
+					rmap.rm_startblock, rmap.rm_blockcount);
 			if (error)
 				return error;
 		}
-	} while (!xrep_refc_rmap_shareable(mp, rmap));
+	} while (!xrep_refc_rmap_shareable(mp, &rmap));
 
+	rrm->startblock = rmap.rm_startblock;
+	rrm->blockcount = rmap.rm_blockcount;
 	*have_rec = true;
 	return 0;
 }
@@ -364,6 +354,45 @@ xrep_refc_sort_records(
 	return error;
 }
 
+#define RRM_NEXT(r)	((r).startblock + (r).blockcount)
+/*
+ * Find the next block where the refcount changes, given the next rmap we
+ * looked at and the ones we're already tracking.
+ */
+static inline int
+xrep_refc_next_edge(
+	struct xfarray		*rmap_bag,
+	struct xrep_refc_rmap	*next_rrm,
+	bool			next_valid,
+	xfs_agblock_t		*nbnop)
+{
+	struct xrep_refc_rmap	rrm;
+	xfarray_idx_t		array_cur = XFARRAY_CURSOR_INIT;
+	xfs_agblock_t		nbno = NULLAGBLOCK;
+	int			error;
+
+	if (next_valid)
+		nbno = next_rrm->startblock;
+
+	while ((error = xfarray_iter(rmap_bag, &array_cur, &rrm)) == 1)
+		nbno = min_t(xfs_agblock_t, nbno, RRM_NEXT(rrm));
+
+	if (error)
+		return error;
+
+	/*
+	 * We should have found /something/ because either next_rrm is the next
+	 * interesting rmap to look at after emitting this refcount extent, or
+	 * there are other rmaps in rmap_bag contributing to the current
+	 * sharing count.  But if something is seriously wrong, bail out.
+	 */
+	if (nbno == NULLAGBLOCK)
+		return -EFSCORRUPTED;
+
+	*nbnop = nbno;
+	return 0;
+}
+
 /*
  * Walk forward through the rmap btree to collect all rmaps starting at
  * @bno in @rmap_bag.  These represent the file(s) that share ownership of
@@ -373,21 +402,22 @@ xrep_refc_sort_records(
 static int
 xrep_refc_push_rmaps_at(
 	struct xrep_refc	*rr,
-	struct rcbag		*rcstack,
+	struct xfarray		*rmap_bag,
 	xfs_agblock_t		bno,
-	struct xfs_rmap_irec	*rmap,
-	bool			*have)
+	struct xrep_refc_rmap	*rrm,
+	bool			*have,
+	uint64_t		*stack_sz)
 {
 	struct xfs_scrub	*sc = rr->sc;
 	int			have_gt;
 	int			error;
 
-	while (*have && rmap->rm_startblock == bno) {
-		error = rcbag_add(rcstack, rr->sc->tp, rmap);
+	while (*have && rrm->startblock == bno) {
+		error = xfarray_store_anywhere(rmap_bag, rrm);
 		if (error)
 			return error;
-
-		error = xrep_refc_walk_rmaps(rr, rmap, have);
+		(*stack_sz)++;
+		error = xrep_refc_walk_rmaps(rr, rrm, have);
 		if (error)
 			return error;
 	}
@@ -395,10 +425,8 @@ xrep_refc_push_rmaps_at(
 	error = xfs_btree_decrement(sc->sa.rmap_cur, 0, &have_gt);
 	if (error)
 		return error;
-	if (XFS_IS_CORRUPT(sc->mp, !have_gt)) {
-		xfs_btree_mark_sick(sc->sa.rmap_cur);
+	if (XFS_IS_CORRUPT(sc->mp, !have_gt))
 		return -EFSCORRUPTED;
-	}
 
 	return 0;
 }
@@ -408,9 +436,12 @@ STATIC int
 xrep_refc_find_refcounts(
 	struct xrep_refc	*rr)
 {
+	struct xrep_refc_rmap	rrm;
 	struct xfs_scrub	*sc = rr->sc;
-	struct rcbag		*rcstack;
-	uint64_t		old_stack_height;
+	struct xfarray		*rmap_bag;
+	char			*descr;
+	uint64_t		old_stack_sz;
+	uint64_t		stack_sz = 0;
 	xfs_agblock_t		sbno;
 	xfs_agblock_t		cbno;
 	xfs_agblock_t		nbno;
@@ -420,11 +451,14 @@ xrep_refc_find_refcounts(
 	xrep_ag_btcur_init(sc, &sc->sa);
 
 	/*
-	 * Set up a bag to store all the rmap records that we're tracking to
-	 * generate a reference count record.  If the size of the bag exceeds
+	 * Set up a sparse array to store all the rmap records that we're
+	 * tracking to generate a reference count record.  If this exceeds
 	 * MAXREFCOUNT, we clamp rc_refcount.
 	 */
-	error = rcbag_init(sc->mp, sc->xmbtp, &rcstack);
+	descr = xchk_xfile_ag_descr(sc, "rmap record bag");
+	error = xfarray_create(descr, 0, sizeof(struct xrep_refc_rmap),
+			&rmap_bag);
+	kfree(descr);
 	if (error)
 		goto out_cur;
 
@@ -435,54 +469,62 @@ xrep_refc_find_refcounts(
 
 	/* Process reverse mappings into refcount data. */
 	while (xfs_btree_has_more_records(sc->sa.rmap_cur)) {
-		struct xfs_rmap_irec	rmap;
-
 		/* Push all rmaps with pblk == sbno onto the stack */
-		error = xrep_refc_walk_rmaps(rr, &rmap, &have);
+		error = xrep_refc_walk_rmaps(rr, &rrm, &have);
 		if (error)
 			goto out_bag;
 		if (!have)
 			break;
-		sbno = cbno = rmap.rm_startblock;
-		error = xrep_refc_push_rmaps_at(rr, rcstack, sbno, &rmap,
-				&have);
+		sbno = cbno = rrm.startblock;
+		error = xrep_refc_push_rmaps_at(rr, rmap_bag, sbno,
+					&rrm, &have, &stack_sz);
 		if (error)
 			goto out_bag;
 
 		/* Set nbno to the bno of the next refcount change */
-		error = rcbag_next_edge(rcstack, sc->tp, &rmap, have, &nbno);
+		error = xrep_refc_next_edge(rmap_bag, &rrm, have, &nbno);
 		if (error)
 			goto out_bag;
 
 		ASSERT(nbno > sbno);
-		old_stack_height = rcbag_count(rcstack);
+		old_stack_sz = stack_sz;
 
 		/* While stack isn't empty... */
-		while (rcbag_count(rcstack) > 0) {
+		while (stack_sz) {
+			xfarray_idx_t	array_cur = XFARRAY_CURSOR_INIT;
+
 			/* Pop all rmaps that end at nbno */
-			error = rcbag_remove_ending_at(rcstack, sc->tp, nbno);
+			while ((error = xfarray_iter(rmap_bag, &array_cur,
+								&rrm)) == 1) {
+				if (RRM_NEXT(rrm) != nbno)
+					continue;
+				error = xfarray_unset(rmap_bag, array_cur - 1);
+				if (error)
+					goto out_bag;
+				stack_sz--;
+			}
 			if (error)
 				goto out_bag;
 
 			/* Push array items that start at nbno */
-			error = xrep_refc_walk_rmaps(rr, &rmap, &have);
+			error = xrep_refc_walk_rmaps(rr, &rrm, &have);
 			if (error)
 				goto out_bag;
 			if (have) {
-				error = xrep_refc_push_rmaps_at(rr, rcstack,
-						nbno, &rmap, &have);
+				error = xrep_refc_push_rmaps_at(rr, rmap_bag,
+						nbno, &rrm, &have, &stack_sz);
 				if (error)
 					goto out_bag;
 			}
 
 			/* Emit refcount if necessary */
 			ASSERT(nbno > cbno);
-			if (rcbag_count(rcstack) != old_stack_height) {
-				if (old_stack_height > 1) {
+			if (stack_sz != old_stack_sz) {
+				if (old_stack_sz > 1) {
 					error = xrep_refc_stash(rr,
 							XFS_REFC_DOMAIN_SHARED,
 							cbno, nbno - cbno,
-							old_stack_height);
+							old_stack_sz);
 					if (error)
 						goto out_bag;
 				}
@@ -490,13 +532,13 @@ xrep_refc_find_refcounts(
 			}
 
 			/* Stack empty, go find the next rmap */
-			if (rcbag_count(rcstack) == 0)
+			if (stack_sz == 0)
 				break;
-			old_stack_height = rcbag_count(rcstack);
+			old_stack_sz = stack_sz;
 			sbno = nbno;
 
 			/* Set nbno to the bno of the next refcount change */
-			error = rcbag_next_edge(rcstack, sc->tp, &rmap, have,
+			error = xrep_refc_next_edge(rmap_bag, &rrm, have,
 					&nbno);
 			if (error)
 				goto out_bag;
@@ -505,13 +547,14 @@ xrep_refc_find_refcounts(
 		}
 	}
 
-	ASSERT(rcbag_count(rcstack) == 0);
+	ASSERT(stack_sz == 0);
 out_bag:
-	rcbag_free(&rcstack);
+	xfarray_destroy(rmap_bag);
 out_cur:
 	xchk_ag_btcur_free(&sc->sa);
 	return error;
 }
+#undef RRM_NEXT
 
 /* Retrieve refcountbt data for bulk load. */
 STATIC int
@@ -610,8 +653,8 @@ xrep_refc_build_new_tree(
 	rr->new_btree.bload.claim_block = xrep_refc_claim_block;
 
 	/* Compute how many blocks we'll need. */
-	refc_cur = xfs_refcountbt_init_cursor(sc->mp, NULL, NULL, pag);
-	xfs_btree_stage_afakeroot(refc_cur, &rr->new_btree.afake);
+	refc_cur = xfs_refcountbt_stage_cursor(sc->mp, &rr->new_btree.afake,
+			pag);
 	error = xfs_btree_bload_compute_geometry(refc_cur,
 			&rr->new_btree.bload,
 			xfarray_length(rr->refcount_records));

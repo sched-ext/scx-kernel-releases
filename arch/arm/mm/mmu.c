@@ -1814,6 +1814,6 @@ void set_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		pteval = pte_next_pfn(pteval);
+		pte_val(pteval) += PAGE_SIZE;
 	}
 }

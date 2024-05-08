@@ -160,13 +160,6 @@ static bool ipv6_raw_deliver(struct sk_buff *skb, int nexthdr)
 		if (!raw_v6_match(net, sk, nexthdr, daddr, saddr,
 				  inet6_iif(skb), inet6_sdif(skb)))
 			continue;
-
-		if (atomic_read(&sk->sk_rmem_alloc) >=
-		    READ_ONCE(sk->sk_rcvbuf)) {
-			atomic_inc(&sk->sk_drops);
-			continue;
-		}
-
 		delivered = true;
 		switch (nexthdr) {
 		case IPPROTO_ICMPV6:
@@ -295,7 +288,8 @@ out:
 }
 
 static void rawv6_err(struct sock *sk, struct sk_buff *skb,
-		      u8 type, u8 code, int offset, __be32 info)
+	       struct inet6_skb_parm *opt,
+	       u8 type, u8 code, int offset, __be32 info)
 {
 	bool recverr = inet6_test_bit(RECVERR6, sk);
 	struct ipv6_pinfo *np = inet6_sk(sk);
@@ -350,7 +344,7 @@ void raw6_icmp_error(struct sk_buff *skb, int nexthdr,
 		if (!raw_v6_match(net, sk, nexthdr, &ip6h->saddr, &ip6h->daddr,
 				  inet6_iif(skb), inet6_iif(skb)))
 			continue;
-		rawv6_err(sk, skb, type, code, inner_offset, info);
+		rawv6_err(sk, skb, NULL, type, code, inner_offset, info);
 	}
 	rcu_read_unlock();
 }
@@ -941,7 +935,7 @@ do_confirm:
 	goto done;
 }
 
-static int rawv6_seticmpfilter(struct sock *sk, int optname,
+static int rawv6_seticmpfilter(struct sock *sk, int level, int optname,
 			       sockptr_t optval, int optlen)
 {
 	switch (optname) {
@@ -958,7 +952,7 @@ static int rawv6_seticmpfilter(struct sock *sk, int optname,
 	return 0;
 }
 
-static int rawv6_geticmpfilter(struct sock *sk, int optname,
+static int rawv6_geticmpfilter(struct sock *sk, int level, int optname,
 			       char __user *optval, int __user *optlen)
 {
 	int len;
@@ -1044,7 +1038,7 @@ static int rawv6_setsockopt(struct sock *sk, int level, int optname,
 	case SOL_ICMPV6:
 		if (inet_sk(sk)->inet_num != IPPROTO_ICMPV6)
 			return -EOPNOTSUPP;
-		return rawv6_seticmpfilter(sk, optname, optval, optlen);
+		return rawv6_seticmpfilter(sk, level, optname, optval, optlen);
 	case SOL_IPV6:
 		if (optname == IPV6_CHECKSUM ||
 		    optname == IPV6_HDRINCL)
@@ -1105,7 +1099,7 @@ static int rawv6_getsockopt(struct sock *sk, int level, int optname,
 	case SOL_ICMPV6:
 		if (inet_sk(sk)->inet_num != IPPROTO_ICMPV6)
 			return -EOPNOTSUPP;
-		return rawv6_geticmpfilter(sk, optname, optval, optlen);
+		return rawv6_geticmpfilter(sk, level, optname, optval, optlen);
 	case SOL_IPV6:
 		if (optname == IPV6_CHECKSUM ||
 		    optname == IPV6_HDRINCL)

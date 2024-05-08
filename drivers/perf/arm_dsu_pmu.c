@@ -774,12 +774,14 @@ static int dsu_pmu_device_probe(struct platform_device *pdev)
 	return rc;
 }
 
-static void dsu_pmu_device_remove(struct platform_device *pdev)
+static int dsu_pmu_device_remove(struct platform_device *pdev)
 {
 	struct dsu_pmu *dsu_pmu = platform_get_drvdata(pdev);
 
 	perf_pmu_unregister(&dsu_pmu->pmu);
 	cpuhp_state_remove_instance(dsu_pmu_cpuhp_state, &dsu_pmu->cpuhp_node);
+
+	return 0;
 }
 
 static const struct of_device_id dsu_pmu_of_match[] = {
@@ -804,7 +806,7 @@ static struct platform_driver dsu_pmu_driver = {
 		.suppress_bind_attrs = true,
 	},
 	.probe = dsu_pmu_device_probe,
-	.remove_new = dsu_pmu_device_remove,
+	.remove = dsu_pmu_device_remove,
 };
 
 static int dsu_pmu_cpu_online(unsigned int cpu, struct hlist_node *node)

@@ -5,7 +5,6 @@
 #ifndef __LINUX_SPI_PXA2XX_SPI_H
 #define __LINUX_SPI_PXA2XX_SPI_H
 
-#include <linux/dmaengine.h>
 #include <linux/types.h>
 
 #include <linux/pxa2xx_ssp.h>
@@ -23,7 +22,7 @@ struct pxa2xx_spi_controller {
 	bool is_target;
 
 	/* DMA engine specific config */
-	dma_filter_fn dma_filter;
+	bool (*dma_filter)(struct dma_chan *chan, void *param);
 	void *tx_param;
 	void *rx_param;
 

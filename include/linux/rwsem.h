@@ -66,24 +66,14 @@ struct rw_semaphore {
 #endif
 };
 
-#define RWSEM_UNLOCKED_VALUE		0UL
-#define RWSEM_WRITER_LOCKED		(1UL << 0)
-#define __RWSEM_COUNT_INIT(name)	.count = ATOMIC_LONG_INIT(RWSEM_UNLOCKED_VALUE)
-
+/* In all implementations count != 0 means locked */
 static inline int rwsem_is_locked(struct rw_semaphore *sem)
 {
-	return atomic_long_read(&sem->count) != RWSEM_UNLOCKED_VALUE;
+	return atomic_long_read(&sem->count) != 0;
 }
 
-static inline void rwsem_assert_held_nolockdep(const struct rw_semaphore *sem)
-{
-	WARN_ON(atomic_long_read(&sem->count) == RWSEM_UNLOCKED_VALUE);
-}
-
-static inline void rwsem_assert_held_write_nolockdep(const struct rw_semaphore *sem)
-{
-	WARN_ON(!(atomic_long_read(&sem->count) & RWSEM_WRITER_LOCKED));
-}
+#define RWSEM_UNLOCKED_VALUE		0L
+#define __RWSEM_COUNT_INIT(name)	.count = ATOMIC_LONG_INIT(RWSEM_UNLOCKED_VALUE)
 
 /* Common initializer macros and functions */
 
@@ -162,19 +152,9 @@ do {								\
 	__init_rwsem((sem), #sem, &__key);			\
 } while (0)
 
-static __always_inline int rwsem_is_locked(const struct rw_semaphore *sem)
+static __always_inline int rwsem_is_locked(struct rw_semaphore *sem)
 {
 	return rw_base_is_locked(&sem->rwbase);
-}
-
-static __always_inline void rwsem_assert_held_nolockdep(const struct rw_semaphore *sem)
-{
-	WARN_ON(!rwsem_is_locked(sem));
-}
-
-static __always_inline void rwsem_assert_held_write_nolockdep(const struct rw_semaphore *sem)
-{
-	WARN_ON(!rw_base_is_write_locked(&sem->rwbase));
 }
 
 static __always_inline int rwsem_is_contended(struct rw_semaphore *sem)
@@ -188,22 +168,6 @@ static __always_inline int rwsem_is_contended(struct rw_semaphore *sem)
  * The functions below are the same for all rwsem implementations including
  * the RT specific variant.
  */
-
-static inline void rwsem_assert_held(const struct rw_semaphore *sem)
-{
-	if (IS_ENABLED(CONFIG_LOCKDEP))
-		lockdep_assert_held(sem);
-	else
-		rwsem_assert_held_nolockdep(sem);
-}
-
-static inline void rwsem_assert_held_write(const struct rw_semaphore *sem)
-{
-	if (IS_ENABLED(CONFIG_LOCKDEP))
-		lockdep_assert_held_write(sem);
-	else
-		rwsem_assert_held_write_nolockdep(sem);
-}
 
 /*
  * lock for reading

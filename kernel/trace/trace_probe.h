@@ -92,7 +92,6 @@ enum fetch_op {
 	FETCH_OP_ARG,		/* Function argument : .param */
 	FETCH_OP_FOFFS,		/* File offset: .immediate */
 	FETCH_OP_DATA,		/* Allocated data: .data */
-	FETCH_OP_EDATA,		/* Entry data: .offset */
 	// Stage 2 (dereference) op
 	FETCH_OP_DEREF,		/* Dereference: .offset */
 	FETCH_OP_UDEREF,	/* User-space Dereference: .offset */
@@ -103,7 +102,6 @@ enum fetch_op {
 	FETCH_OP_ST_STRING,	/* String: .offset, .size */
 	FETCH_OP_ST_USTRING,	/* User String: .offset, .size */
 	FETCH_OP_ST_SYMSTR,	/* Kernel Symbol String: .offset, .size */
-	FETCH_OP_ST_EDATA,	/* Store Entry Data: .offset */
 	// Stage 4 (modify) op
 	FETCH_OP_MOD_BF,	/* Bitfield: .basesize, .lshift, .rshift */
 	// Stage 5 (loop) op
@@ -234,11 +232,6 @@ struct probe_arg {
 	const struct fetch_type	*type;	/* Type of this argument */
 };
 
-struct probe_entry_arg {
-	struct fetch_insn	*code;
-	unsigned int		size;	/* The entry data size */
-};
-
 struct trace_uprobe_filter {
 	rwlock_t		rwlock;
 	int			nr_systemwide;
@@ -260,7 +253,6 @@ struct trace_probe {
 	struct trace_probe_event	*event;
 	ssize_t				size;	/* trace entry size */
 	unsigned int			nr_args;
-	struct probe_entry_arg		*entry_arg;	/* This is only for return probe */
 	struct probe_arg		args[];
 };
 
@@ -346,7 +338,7 @@ static inline bool trace_probe_has_single_file(struct trace_probe *tp)
 }
 
 int trace_probe_init(struct trace_probe *tp, const char *event,
-		     const char *group, bool alloc_filter, int nargs);
+		     const char *group, bool alloc_filter);
 void trace_probe_cleanup(struct trace_probe *tp);
 int trace_probe_append(struct trace_probe *tp, struct trace_probe *to);
 void trace_probe_unlink(struct trace_probe *tp);
@@ -362,18 +354,6 @@ bool trace_probe_match_command_args(struct trace_probe *tp,
 int trace_probe_create(const char *raw_command, int (*createfn)(int, const char **));
 int trace_probe_print_args(struct trace_seq *s, struct probe_arg *args, int nr_args,
 		 u8 *data, void *field);
-
-#ifdef CONFIG_HAVE_FUNCTION_ARG_ACCESS_API
-int traceprobe_get_entry_data_size(struct trace_probe *tp);
-/* This is a runtime function to store entry data */
-void store_trace_entry_data(void *edata, struct trace_probe *tp, struct pt_regs *regs);
-#else /* !CONFIG_HAVE_FUNCTION_ARG_ACCESS_API */
-static inline int traceprobe_get_entry_data_size(struct trace_probe *tp)
-{
-	return 0;
-}
-#define store_trace_entry_data(edata, tp, regs) do { } while (0)
-#endif
 
 #define trace_probe_for_each_link(pos, tp)	\
 	list_for_each_entry(pos, &(tp)->event->files, list)
@@ -401,11 +381,6 @@ static inline bool tparg_is_function_entry(unsigned int flags)
 	return (flags & TPARG_FL_LOC_MASK) == (TPARG_FL_KERNEL | TPARG_FL_FENTRY);
 }
 
-static inline bool tparg_is_function_return(unsigned int flags)
-{
-	return (flags & TPARG_FL_LOC_MASK) == (TPARG_FL_KERNEL | TPARG_FL_RETURN);
-}
-
 struct traceprobe_parse_context {
 	struct trace_event_call *event;
 	/* BTF related parameters */
@@ -417,7 +392,6 @@ struct traceprobe_parse_context {
 	const struct btf_type *last_type;	/* Saved type */
 	u32 last_bitoffs;		/* Saved bitoffs */
 	u32 last_bitsize;		/* Saved bitsize */
-	struct trace_probe *tp;
 	unsigned int flags;
 	int offset;
 };
@@ -532,7 +506,7 @@ extern int traceprobe_define_arg_fields(struct trace_event_call *event_call,
 	C(NO_BTFARG,		"This variable is not found at this probe point"),\
 	C(NO_BTF_ENTRY,		"No BTF entry for this probe point"),	\
 	C(BAD_VAR_ARGS,		"$arg* must be an independent parameter without name etc."),\
-	C(NOFENTRY_ARGS,	"$arg* can be used only on function entry or exit"),	\
+	C(NOFENTRY_ARGS,	"$arg* can be used only on function entry"),	\
 	C(DOUBLE_ARGS,		"$arg* can be used only once in the parameters"),	\
 	C(ARGS_2LONG,		"$arg* failed because the argument list is too long"),	\
 	C(ARGIDX_2BIG,		"$argN index is too big"),		\
@@ -541,8 +515,7 @@ extern int traceprobe_define_arg_fields(struct trace_event_call *event_call,
 	C(BAD_HYPHEN,		"Failed to parse single hyphen. Forgot '>'?"),	\
 	C(NO_BTF_FIELD,		"This field is not found."),	\
 	C(BAD_BTF_TID,		"Failed to get BTF type info."),\
-	C(BAD_TYPE4STR,		"This type does not fit for string."),\
-	C(NEED_STRING_TYPE,	"$comm and immediate-string only accepts string type"),
+	C(BAD_TYPE4STR,		"This type does not fit for string."),
 
 #undef C
 #define C(a, b)		TP_ERR_##a

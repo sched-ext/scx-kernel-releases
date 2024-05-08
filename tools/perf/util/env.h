@@ -12,7 +12,6 @@ struct perf_cpu_map;
 struct cpu_topology_map {
 	int	socket_id;
 	int	die_id;
-	int	cluster_id;
 	int	core_id;
 };
 

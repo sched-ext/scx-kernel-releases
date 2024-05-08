@@ -7,7 +7,6 @@
 #include <linux/interrupt.h>
 #include <linux/vhost_iotlb.h>
 #include <linux/virtio_net.h>
-#include <linux/virtio_blk.h>
 #include <linux/if_ether.h>
 
 /**
@@ -196,10 +195,6 @@ struct vdpa_map_file {
  *				@idx: virtqueue index
  *				Returns int: irq number of a virtqueue,
  *				negative number if no irq assigned.
- * @get_vq_size:		Get the size of a specific virtqueue (optional)
- *				@vdev: vdpa device
- *				@idx: virtqueue index
- *				Return u16: the size of the virtqueue
  * @get_vq_align:		Get the virtqueue align requirement
  *				for the device
  *				@vdev: vdpa device
@@ -391,7 +386,6 @@ struct vdpa_config_ops {
 	(*get_vq_notification)(struct vdpa_device *vdev, u16 idx);
 	/* vq irq is not expected to be changed once DRIVER_OK is set */
 	int (*get_vq_irq)(struct vdpa_device *vdev, u16 idx);
-	u16 (*get_vq_size)(struct vdpa_device *vdev, u16 idx);
 
 	/* Device ops */
 	u32 (*get_vq_align)(struct vdpa_device *vdev);

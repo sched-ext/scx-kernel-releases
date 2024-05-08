@@ -774,7 +774,7 @@ err_core_init:
 	return err;
 }
 
-static void kim_remove(struct platform_device *pdev)
+static int kim_remove(struct platform_device *pdev)
 {
 	/* free the GPIOs requested */
 	struct ti_st_plat_data	*pdata = pdev->dev.platform_data;
@@ -798,6 +798,7 @@ static void kim_remove(struct platform_device *pdev)
 
 	kfree(kim_gdata);
 	kim_gdata = NULL;
+	return 0;
 }
 
 static int kim_suspend(struct platform_device *pdev, pm_message_t state)
@@ -824,7 +825,7 @@ static int kim_resume(struct platform_device *pdev)
 /* entry point for ST KIM module, called in from ST Core */
 static struct platform_driver kim_platform_driver = {
 	.probe = kim_probe,
-	.remove_new = kim_remove,
+	.remove = kim_remove,
 	.suspend = kim_suspend,
 	.resume = kim_resume,
 	.driver = {

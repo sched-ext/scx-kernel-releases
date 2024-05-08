@@ -14,7 +14,7 @@ enum {
 struct papr_sysparm_io_block {
 	__u32 parameter;
 	__u16 length;
-	__u8 data[PAPR_SYSPARM_MAX_OUTPUT];
+	char data[PAPR_SYSPARM_MAX_OUTPUT];
 };
 
 /**

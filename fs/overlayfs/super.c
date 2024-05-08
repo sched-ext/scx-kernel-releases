@@ -28,38 +28,41 @@ MODULE_LICENSE("GPL");
 
 struct ovl_dir_cache;
 
-static struct dentry *ovl_d_real(struct dentry *dentry, enum d_real_type type)
+static struct dentry *ovl_d_real(struct dentry *dentry,
+				 const struct inode *inode)
 {
-	struct dentry *upper, *lower;
+	struct dentry *real = NULL, *lower;
 	int err;
 
-	switch (type) {
-	case D_REAL_DATA:
-	case D_REAL_METADATA:
-		break;
-	default:
+	/*
+	 * vfs is only expected to call d_real() with NULL from d_real_inode()
+	 * and with overlay inode from file_dentry() on an overlay file.
+	 *
+	 * TODO: remove @inode argument from d_real() API, remove code in this
+	 * function that deals with non-NULL @inode and remove d_real() call
+	 * from file_dentry().
+	 */
+	if (inode && d_inode(dentry) == inode)
+		return dentry;
+	else if (inode)
 		goto bug;
-	}
 
 	if (!d_is_reg(dentry)) {
 		/* d_real_inode() is only relevant for regular files */
 		return dentry;
 	}
 
-	upper = ovl_dentry_upper(dentry);
-	if (upper && (type == D_REAL_METADATA ||
-		      ovl_has_upperdata(d_inode(dentry))))
-		return upper;
+	real = ovl_dentry_upper(dentry);
+	if (real && (inode == d_inode(real)))
+		return real;
 
-	if (type == D_REAL_METADATA) {
-		lower = ovl_dentry_lower(dentry);
-		goto real_lower;
-	}
+	if (real && !inode && ovl_has_upperdata(d_inode(dentry)))
+		return real;
 
 	/*
-	 * Best effort lazy lookup of lowerdata for D_REAL_DATA case to return
+	 * Best effort lazy lookup of lowerdata for !inode case to return
 	 * the real lowerdata dentry.  The only current caller of d_real() with
-	 * D_REAL_DATA is d_real_inode() from trace_uprobe and this caller is
+	 * NULL inode is d_real_inode() from trace_uprobe and this caller is
 	 * likely going to be followed reading from the file, before placing
 	 * uprobes on offset within the file, so lowerdata should be available
 	 * when setting the uprobe.
@@ -70,13 +73,18 @@ static struct dentry *ovl_d_real(struct dentry *dentry, enum d_real_type type)
 	lower = ovl_dentry_lowerdata(dentry);
 	if (!lower)
 		goto bug;
+	real = lower;
 
-real_lower:
-	/* Handle recursion into stacked lower fs */
-	return d_real(lower, type);
+	/* Handle recursion */
+	real = d_real(real, inode);
 
+	if (!inode || inode == d_inode(real))
+		return real;
 bug:
-	WARN(1, "%s(%pd4, %d): real dentry not found\n", __func__, dentry, type);
+	WARN(1, "%s(%pd4, %s:%lu): real dentry (%p/%lu) not found\n",
+	     __func__, dentry, inode ? inode->i_sb->s_id : "NULL",
+	     inode ? inode->i_ino : 0, real,
+	     real && d_inode(real) ? d_inode(real)->i_ino : 0);
 	return dentry;
 }
 
@@ -1503,7 +1511,7 @@ static int __init ovl_init(void)
 	ovl_inode_cachep = kmem_cache_create("ovl_inode",
 					     sizeof(struct ovl_inode), 0,
 					     (SLAB_RECLAIM_ACCOUNT|
-					      SLAB_ACCOUNT),
+					      SLAB_MEM_SPREAD|SLAB_ACCOUNT),
 					     ovl_inode_init_once);
 	if (ovl_inode_cachep == NULL)
 		return -ENOMEM;
