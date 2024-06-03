@@ -1017,7 +1017,7 @@ static u32 higher_bits(u32 flags)
 static u32 highest_bit(u32 flags)
 {
 	int bit = fls(flags);
-	return bit ? 1 << (bit - 1) : 0;
+	return ((u64) 1 << bit) >> 1;
 }
 
 /*
@@ -3841,7 +3841,7 @@ static inline void scx_cgroup_unlock(void) {}
  *   isn't tied to the CPU at that point. Preemption is implemented by resetting
  *   the victim task's slice to 0 and triggering reschedule on the target CPU.
  *
- * - migrate_task_rq: Unncessary as task to cpu mapping is transient.
+ * - migrate_task_rq: Unnecessary as task to cpu mapping is transient.
  *
  * - task_fork/dead: We need fork/dead notifications for all tasks regardless of
  *   their current sched_class. Call them directly from sched core instead.
@@ -5741,6 +5741,9 @@ void __init init_sched_ext_class(void)
 		BUG_ON(!zalloc_cpumask_var(&rq->scx.cpus_to_preempt, GFP_KERNEL));
 		BUG_ON(!zalloc_cpumask_var(&rq->scx.cpus_to_wait, GFP_KERNEL));
 		init_irq_work(&rq->scx.kick_cpus_irq_work, kick_cpus_irq_workfn);
+
+		if (cpu_online(cpu))
+			cpu_rq(cpu)->scx.flags |= SCX_RQ_ONLINE;
 	}
 
 	register_sysrq_key('S', &sysrq_sched_ext_reset_op);
