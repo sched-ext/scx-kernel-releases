@@ -1017,7 +1017,7 @@ static u32 higher_bits(u32 flags)
 static u32 highest_bit(u32 flags)
 {
 	int bit = fls(flags);
-	return ((u64) 1 << bit) >> 1;
+	return ((u64)1 << bit) >> 1;
 }
 
 /*
@@ -1820,8 +1820,8 @@ static void do_enqueue_task(struct rq *rq, struct task_struct *p, u64 enq_flags,
 		goto local_norefill;
 
 	/*
-	 * If !rq->online, we already told the BPF scheduler that the CPU is
-	 * offline. We're just trying to on/offline the CPU. Don't bother the
+	 * If !scx_rq_online(), we already told the BPF scheduler that the CPU
+	 * is offline and are just running the hotplug path. Don't bother the
 	 * BPF scheduler.
 	 */
 	if (!scx_rq_online(rq))
@@ -2137,7 +2137,7 @@ static bool move_task_to_local_dsq(struct rq *rq, struct task_struct *p,
 }
 
 /**
- * dispatch_to_local_dsq_lock - Ensure source and desitnation rq's are locked
+ * dispatch_to_local_dsq_lock - Ensure source and destination rq's are locked
  * @rq: current rq which is locked
  * @rf: rq_flags to use when unlocking @rq
  * @src_rq: rq to move task from
@@ -2402,7 +2402,8 @@ dispatch_to_local_dsq(struct rq *rq, struct rq_flags *rf, u64 dsq_id,
 		}
 
 		/* if the destination CPU is idle, wake it up */
-		if (dsp && p->sched_class > dst_rq->curr->sched_class)
+		if (dsp && sched_class_above(p->sched_class,
+					     dst_rq->curr->sched_class))
 			resched_curr(dst_rq);
 
 		dispatch_to_local_dsq_unlock(rq, rf, src_rq, locked_dst_rq);
@@ -3209,29 +3210,33 @@ static void handle_hotplug(struct rq *rq, bool online)
 	atomic_long_inc(&scx_hotplug_seq);
 
 	if (online && SCX_HAS_OP(cpu_online))
-		SCX_CALL_OP(SCX_KF_REST, cpu_online, cpu);
+		SCX_CALL_OP(SCX_KF_SLEEPABLE, cpu_online, cpu);
 	else if (!online && SCX_HAS_OP(cpu_offline))
-		SCX_CALL_OP(SCX_KF_REST, cpu_offline, cpu);
+		SCX_CALL_OP(SCX_KF_SLEEPABLE, cpu_offline, cpu);
 	else
 		scx_ops_exit(SCX_ECODE_ACT_RESTART | SCX_ECODE_RSN_HOTPLUG,
 			     "cpu %d going %s, exiting scheduler", cpu,
 			     online ? "online" : "offline");
 }
 
-static void rq_online_scx(struct rq *rq, enum rq_onoff_reason reason)
+void scx_rq_activate(struct rq *rq)
 {
-	if (reason == RQ_ONOFF_HOTPLUG) {
-		handle_hotplug(rq, true);
-		rq->scx.flags |= SCX_RQ_ONLINE;
-	}
+	handle_hotplug(rq, true);
 }
 
-static void rq_offline_scx(struct rq *rq, enum rq_onoff_reason reason)
+void scx_rq_deactivate(struct rq *rq)
 {
-	if (reason == RQ_ONOFF_HOTPLUG) {
-		rq->scx.flags &= ~SCX_RQ_ONLINE;
-		handle_hotplug(rq, false);
-	}
+	handle_hotplug(rq, false);
+}
+
+static void rq_online_scx(struct rq *rq)
+{
+	rq->scx.flags |= SCX_RQ_ONLINE;
+}
+
+static void rq_offline_scx(struct rq *rq)
+{
+	rq->scx.flags &= ~SCX_RQ_ONLINE;
 }
 
 #else	/* CONFIG_SMP */
@@ -5179,11 +5184,10 @@ extern struct btf *btf_vmlinux;
 static const struct btf_type *task_struct_type;
 static u32 task_struct_type_id;
 
-/* Make the 2nd argument of .dispatch a pointer that can be NULL. */
-static bool promote_dispatch_2nd_arg(int off, int size,
-				     enum bpf_access_type type,
-				     const struct bpf_prog *prog,
-				     struct bpf_insn_access_aux *info)
+static bool set_arg_maybe_null(const char *op, int arg_n, int off, int size,
+			       enum bpf_access_type type,
+			       const struct bpf_prog *prog,
+			       struct bpf_insn_access_aux *info)
 {
 	struct btf *btf = bpf_get_btf_vmlinux();
 	const struct bpf_struct_ops_desc *st_ops_desc;
@@ -5191,6 +5195,10 @@ static bool promote_dispatch_2nd_arg(int off, int size,
 	const struct btf_type *t;
 	u32 btf_id, member_idx;
 	const char *mname;
+
+	/* struct_ops op args are all sequential, 64-bit numbers */
+	if (off != arg_n * sizeof(__u64))
+		return false;
 
 	/* btf_id should be the type id of struct sched_ext_ops */
 	btf_id = prog->aux->attach_btf_id;
@@ -5213,14 +5221,7 @@ static bool promote_dispatch_2nd_arg(int off, int size,
 	member = &btf_type_member(t)[member_idx];
 	mname = btf_name_by_offset(btf_vmlinux, member->name_off);
 
-	/*
-	 * Check if it is the second argument of the function pointer at
-	 * "dispatch" in struct sched_ext_ops. The arguments of struct_ops
-	 * operators are sequential and 64-bit, so the second argument is at
-	 * offset sizeof(__u64).
-	 */
-	if (strcmp(mname, "dispatch") == 0 &&
-	    off == sizeof(__u64)) {
+	if (!strcmp(mname, op)) {
 		/*
 		 * The value is a pointer to a type (struct task_struct) given
 		 * by a BTF ID (PTR_TO_BTF_ID). It is trusted (PTR_TRUSTED),
@@ -5248,7 +5249,8 @@ static bool bpf_scx_is_valid_access(int off, int size,
 {
 	if (type != BPF_READ)
 		return false;
-	if (promote_dispatch_2nd_arg(off, size, type, prog, info))
+	if (set_arg_maybe_null("dispatch", 1, off, size, type, prog, info) ||
+	    set_arg_maybe_null("yield", 1, off, size, type, prog, info))
 		return true;
 	if (off < 0 || off >= sizeof(__u64) * MAX_BPF_FUNC_ARGS)
 		return false;
@@ -5358,6 +5360,8 @@ static int bpf_scx_check_member(const struct btf_type *t,
 	case offsetof(struct sched_ext_ops, cgroup_exit):
 	case offsetof(struct sched_ext_ops, cgroup_prep_move):
 #endif
+	case offsetof(struct sched_ext_ops, cpu_online):
+	case offsetof(struct sched_ext_ops, cpu_offline):
 	case offsetof(struct sched_ext_ops, init):
 	case offsetof(struct sched_ext_ops, exit):
 		break;
@@ -6088,13 +6092,13 @@ __bpf_kfunc bool __scx_bpf_consume_task(unsigned long it, struct task_struct *p)
 	 */
 	dsq = READ_ONCE(p->scx.dsq);
 
+	if (unlikely(!dsq || dsq != kit_dsq))
+		return false;
+
 	if (unlikely(dsq->id == SCX_DSQ_LOCAL)) {
 		scx_ops_error("local DSQ not allowed");
 		return false;
 	}
-
-	if (unlikely(!dsq || dsq != kit_dsq))
-		return false;
 
 	if (!scx_kf_allowed(SCX_KF_DISPATCH))
 		return false;
